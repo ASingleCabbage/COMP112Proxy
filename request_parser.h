@@ -22,7 +22,7 @@ size_t requestBody(Request req, char **);
 /* returns value of a given header entry
   -1 if entry not in header
   0 if entry in header but doesn't have value (e.g. cache-control : no-cache)*/
-size_t requestHeaderValue(Request req, headerEntry entry);
+int requestHeaderValue(Request req, headerEntry entry);
 
 /* Seperate setter for age as it's the only field we can update */
 void requestSetAge(Request req, int age);
