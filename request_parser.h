@@ -5,9 +5,11 @@
 #include <stdlib.h>
 
 typedef struct reqest *Request;
+
+// NOTICE max stale has optional value that goes with it
 typedef enum {MAX_AGE, MAX_STALE, MIN_FRESH, N_CACHE, N_STORE, N_TRANSFORM,
               ONLY_IF_CACHED, MUST_REVAL, PUBLIC, PRIVATE, PROXY_REVAL,
-              S_MAX_AGE, CACHE_AGE} headerEntry;
+              S_MAX_AGE} headerEntry;
 
 /* creates new request
    message can be freed after the call */
@@ -19,12 +21,15 @@ void requestFree(Request req);
    body is immutable as no new memory is allocated */
 size_t requestBody(Request req, char **);
 
+/* returns true if a cache control header exists in request */
+bool requestHasEntry(Request req, headerEntry entry);
+
 /* returns value of a given header entry
-  -1 if entry not in header
-  0 if entry in header but doesn't have value (e.g. cache-control : no-cache)*/
+  -1 if entry not in header or has no value (e.g. cache-control : no-cache)*/
 int requestHeaderValue(Request req, headerEntry entry);
 
-/* Seperate setter for age as it's the only field we can update */
+/* Seperate getter and setter for age as it's the only field we can update */
+int requestGetAge(Request req, int age);
 void requestSetAge(Request req, int age);
 
 /* sets pointer passed by reference to the entire request, and returns length
