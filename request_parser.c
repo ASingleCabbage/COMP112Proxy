@@ -7,18 +7,14 @@
 #define FLAG_N_STORE        0x00000004
 #define FLAG_N_TRANSFORM    0x00000008
 #define FLAG_ONLY_IF_CACHED 0x00000010
-// #define FLAG_MUST_REVAL     0x00000020
-// #define FLAG_PUBLIC         0x00000040
-// #define FLAG_PRIVATE        0x00000080
-// #define FLAG_PROXY_REVAL    0x00000100
 #define FIELD_BUFFER_SIZE 50
 
 struct request{
-    httpMethod method;
     char *uri;
     char *host;
     int uriLen;
     int hostLen;
+    httpMethod method;
     int maxAge;
     int maxStale;
     int minFresh;
@@ -28,7 +24,9 @@ struct request{
 // todo unit tests required
 
 Request requestNew(char * message, size_t length){
-    char *sp;
+    char *msg = calloc(1, length);
+    strcpy(msg, message);
+    char *rest = msg;
     Request req = calloc(1, sizeof(struct request));
     char *token;
 
@@ -39,7 +37,7 @@ Request requestNew(char * message, size_t length){
     req->maxStale = -1;
     req->minFresh = -1;
 
-    token = strtok_r(message, " ", &sp);
+    token = strsep(&rest, " ");
     if(strcmp(token, "GET") == 0){
         req->method = GET;
     }else if(strcmp(token, "CONNECT") == 0){
@@ -49,24 +47,25 @@ Request requestNew(char * message, size_t length){
         return NULL;
     }
 
-    token = strtok_r(NULL, " ", &sp);
+    token = strsep(&rest, " ");
     req->uriLen = strlen(token);
     req->uri = malloc(req->uriLen);
     strcpy(req->uri, token);
 
-    token = strtok_r(NULL, "/n", &sp); /* HTTP version, dropping field */
-    token = strtok_r(NULL, "/n", &sp);
+    token = strsep(&rest, "\n"); /* HTTP version, dropping field */
+    token = strsep(&rest, "\n");
 
     char buf1[FIELD_BUFFER_SIZE];
-    while(token != NULL){
+    //todo check if possible to break before reaching body
+    while(token != NULL || strlen(token) == 0){
         if(sscanf(token, "Host: %s", buf1) == 1){
             req->hostLen = strlen(buf1);
             req->host = malloc(req->hostLen);
             strcpy(req->uri, buf1);
         }else if(sscanf(token, "Cache-Control: %[^\n]", buf1)){
-            char *sp2;
+            char *rest2 = buf1;
             char *tk;
-            tk = strtok_r(buf1, ", ", &sp2);
+            tk = strsep(&rest2, ", ");
             while(tk != NULL){
                 if(strcmp(tk, "no-cache") == 0){
                     req->flags &= FLAG_N_CACHE;
@@ -86,11 +85,12 @@ Request requestNew(char * message, size_t length){
                 }else if(strncmp(tk, "min-fresh=", 10) == 0){
                     req->minFresh = strtol(tk + 10, NULL, 10);
                 }
-                tk = strtok_r(NULL, ", ", &sp2);
+                tk = strsep(&rest2, ", ");
             }
         }
+        token = strsep(&rest, " ");
     }
-
+    free msg;
     return req;
 }
 
@@ -115,30 +115,30 @@ int requestUri(Request req, char **urip){
 
 bool requestHasHeader(Request req, reqHeader hdr){
     switch(hdr){
-        case MAX_AGE:
+        case REQ_MAX_AGE:
             return req->maxAge != -1;
-        case MAX_STALE:
+        case REQ_MAX_STALE:
             return req->flags & FLAG_MAX_STALE;
-        case MIN_FRESH:
+        case REQ_MIN_FRESH:
             return req->minFresh != -1;
-        case N_CACHE:
+        case REQ_N_CACHE:
             return req->flags & FLAG_N_CACHE;
-        case N_STORE:
+        case REQ_N_STORE:
             return req->flags & FLAG_N_STORE;
-        case N_TRANSFORM:
+        case REQ_N_TRANSFORM:
             return req->flags & FLAG_N_TRANSFORM;
-        case ONLY_IF_CACHED:
+        case REQ_ONLY_IF_CACHED:
             return req->flags & FLAG_ONLY_IF_CACHED;
     }
 }
 
 int requestHeaderValue(Request req, reqHeader hdr){
     switch(hdr){
-        case MAX_AGE:
+        case REQ_MAX_AGE:
             return req->maxAge;
-        case MAX_STALE:
+        case REQ_MAX_STALE:
             return req->maxStale;
-        case MIN_FRESH:
+        case REQ_MIN_FRESH:
             return req->minFresh;
         default:
             return -1;
