@@ -1,5 +1,7 @@
 #include "response_parser.h"
 #include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
 #include <stdlib.h>
 
 #define FLAG_N_CACHE        0x00000001
@@ -27,7 +29,7 @@ struct response{
 //todo cannot handle case where message header already contains age
 Response responseNew(char * message, size_t length){
     char *msg = calloc(1, length);
-    strcpy(msg, message);
+    memcpy(msg, message, length);
     char *rest = msg;
     char *token;
     Response rsp = calloc(1, sizeof(struct response));
@@ -42,8 +44,13 @@ Response responseNew(char * message, size_t length){
 
     token = strsep(&rest, "\n");
     char buf1[FIELD_BUFFER_SIZE];
-    while((token != NULL) | (strlen(token) == 0)){
+    while(token != NULL){
+        if(strlen(token) <= 1){
+            break;
+        }
+        // printf("Token (%d):%s\n", strlen(token), token);
         if(sscanf(token, "Cache-Control: %[^\n]", buf1)){
+            // printf("%s\n", "[IDENTIFIED CACHE CONTROL]\n");
             char *br = buf1;
             char *tk;
             tk = strsep(&br, " ");
@@ -64,22 +71,29 @@ Response responseNew(char * message, size_t length){
                     rsp->flags &= FLAG_PROXY_REVAL;
                 }else if(strncmp(tk, "max-age=", 8) == 0){
                     rsp->maxAge = strtol(tk + 8, NULL, 10);
+                    // printf("Max age %s, %d\n", tk+8, rsp->maxAge);
                 }else if(strncmp(tk, "s-maxage=", 9) == 0){
                     rsp->sMaxAge = strtol(tk + 9, NULL, 10);
                 }
                 tk = strsep(&br, " ");
             }
         }
+        token = strsep(&rest, "\n");
     }
     rsp->headLen = token - msg;
     rsp->head = calloc(1, rsp->headLen);
-    strncpy(rsp->head, message, rsp->headLen);
+    memcpy(rsp->head, message, rsp->headLen);
 
     rsp->bodyLen = length - rsp->headLen - 2;
     rsp->body = calloc(1, rsp->bodyLen);
-    strncpy(rsp->body, message + rsp->headLen + 2, rsp->bodyLen);
 
-    free msg;
+    // printf("remaining length %d\n", rsp->bodyLen);
+    // printf("%s\n", rest);
+
+    //todo may cause issues for binary bodies? insufficient testing here
+    memcpy(rsp->body, rest, rsp->bodyLen);
+
+    free(msg);
     return rsp;
 }
 
@@ -116,6 +130,8 @@ bool responseHasHeader(Response rsp, rspHeader hdr){
             return rsp->flags & FLAG_PRIVATE;
         case RSP_PROXY_REVAL:
             return rsp->flags & FLAG_PROXY_REVAL;
+        default:
+            return false;
     }
 }
 
@@ -130,7 +146,7 @@ int responseHeaderValue(Response rsp, rspHeader hdr){
     }
 }
 
-int responseGetAge(Response rsp, int age){
+int responseGetAge(Response rsp){
     return rsp->cacheAge;
 }
 void responseSetAge(Response rsp, int age){
@@ -139,21 +155,21 @@ void responseSetAge(Response rsp, int age){
 
 size_t responseToString(Response rsp, char **sp){
     char agestr[10];
-    itoa(rsp->cacheAge, agestr, 10);
+    snprintf(agestr, 10, "%d", rsp->cacheAge);
     int agelen = strlen(agestr);
     int length = agelen + rsp->bodyLen + rsp->headLen + 9;
     *sp = malloc(length);
 
     char *end = *sp;
-    memcpy(end, resp->head, resp->headLen);
-    end += resp->headLen;
+    memcpy(end, rsp->head, rsp->headLen - 2);
+    end += rsp->headLen - 2;
     memcpy(end, "\r\nAge: ", 7);
     end += 7;
     memcpy(end, agestr, agelen);
     end += agelen;
-    memcpy(end, "\r\n\r\n", 2);
-    end += 2;
-    memcpy(end, resp->body, resp->bodyLen);
+    memcpy(end, "\r\n\r\n", 4);
+    end += 4;
+    memcpy(end, rsp->body, rsp->bodyLen);
 
     return length;
 }

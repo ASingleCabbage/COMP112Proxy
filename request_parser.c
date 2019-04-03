@@ -48,7 +48,7 @@ Request requestNew(char * message, size_t length){
     }
 
     token = strsep(&rest, " ");
-    req->uriLen = strlen(token);
+    req->uriLen = strlen(token) + 1;
     req->uri = malloc(req->uriLen);
     strcpy(req->uri, token);
 
@@ -57,9 +57,13 @@ Request requestNew(char * message, size_t length){
 
     char buf1[FIELD_BUFFER_SIZE];
     //todo check if possible to break before reaching body
-    while(token != NULL || strlen(token) == 0){
+    while(token != NULL){
+        if(strlen(token) == 0){
+            break;
+        }
+
         if(sscanf(token, "Host: %s", buf1) == 1){
-            req->hostLen = strlen(buf1);
+            req->hostLen = strlen(buf1) + 1;
             req->host = malloc(req->hostLen);
             strcpy(req->uri, buf1);
         }else if(sscanf(token, "Cache-Control: %[^\n]", buf1)){
@@ -90,7 +94,7 @@ Request requestNew(char * message, size_t length){
         }
         token = strsep(&rest, " ");
     }
-    free msg;
+    free(msg);
     return req;
 }
 
@@ -103,12 +107,16 @@ void requestFree(Request req){
     free(req);
 }
 
-int requestHost(Request req, char **hostp){
+httpMethod requestMethod(Request req){
+    return req->method;
+}
+
+size_t requestHost(Request req, char **hostp){
     *hostp = req->host;
     return req->hostLen;
 }
 
-int requestUri(Request req, char **urip){
+size_t requestUri(Request req, char **urip){
     *urip = req->uri;
     return req->uriLen;
 }
@@ -129,6 +137,8 @@ bool requestHasHeader(Request req, reqHeader hdr){
             return req->flags & FLAG_N_TRANSFORM;
         case REQ_ONLY_IF_CACHED:
             return req->flags & FLAG_ONLY_IF_CACHED;
+        default:
+            return false;
     }
 }
 

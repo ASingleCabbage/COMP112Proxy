@@ -2,6 +2,7 @@
 #define RESPONSE_PARSER
 
 #include <stdbool.h>
+#include <stdlib.h>
 
 //seperate type for response
 typedef struct response *Response;
@@ -19,7 +20,8 @@ bool responseHasHeader(Response rsp, rspHeader hdr);
 
 int responseHeaderValue(Response rsp, rspHeader hdr);
 
-int responseGetAge(Response rsp, int age);
+/* Response itself contains age field, so can be directly cached in a data structure */
+int responseGetAge(Response rsp);
 void responseSetAge(Response rsp, int age);
 
 size_t responseToString(Response rsp, char **s);
