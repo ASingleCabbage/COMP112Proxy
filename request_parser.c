@@ -9,11 +9,18 @@
 #define FLAG_ONLY_IF_CACHED 0x00000010
 #define FIELD_BUFFER_SIZE 50
 
+// TODO parse host and port (check functionality)
+// host is mandatory field in HTTP 1.1?
+// TODO additional parsing for content-length, to be used for msgLen (partials)
+
 struct request{
+    char *fullMsg;
     char *uri;
     char *host;
+    int msgLen;
     int uriLen;
     int hostLen;
+    int port;
     httpMethod method;
     int maxAge;
     int maxStale;
@@ -21,18 +28,37 @@ struct request{
     char flags;
 };
 
-// todo unit tests required
+// basic functionality tested
+// we'll do more debugging if it actually crashes ¯\_(ツ)_/¯
 
 Request requestNew(char * message, size_t length){
-    char *msg = calloc(1, length);
-    strcpy(msg, message);
+    //fprintf(stderr, "Received request length %d\n %s\n", length, message);
+    // fwrite(message, length, 1, stderr);
+    // fprintf(stderr, "\n");
+
+    if(length <= 0){
+        return NULL;
+    }
+
+    // used for tokens
+    char *msg = malloc(length + 1);
+    memcpy(msg, message, length);
+    msg[length] = '\0'; //making it a c string so strsep wont overflow
     char *rest = msg;
-    Request req = calloc(1, sizeof(struct request));
     char *token;
+
+    Request req = calloc(1, sizeof(struct request));
+    //we can just use the message and not free it after the requestNew call,
+    //but I want to make it the same as request_parser (message freeable)
+    req->fullMsg = malloc(length + 1);
+    memcpy(req->fullMsg, message, length);
+    req->fullMsg[length] = '\0';
+    req->msgLen = length;
 
     //initialize request with proper values
     req->host = NULL;
     req->hostLen = -1;
+    req->port = -1;
     req->maxAge = -1;
     req->maxStale = -1;
     req->minFresh = -1;
@@ -52,6 +78,13 @@ Request requestNew(char * message, size_t length){
     req->uri = malloc(req->uriLen);
     strcpy(req->uri, token);
 
+    char uriNoPort[FIELD_BUFFER_SIZE];
+    if(sscanf(token, "%[^:]:%d", uriNoPort, &(req->port)) < 2){
+        fprintf(stderr, "No port specified\n");
+    }else{
+        fprintf(stderr, "Port %d specified\n", req->port);
+    }
+
     token = strsep(&rest, "\n"); /* HTTP version, dropping field */
     token = strsep(&rest, "\n");
 
@@ -61,11 +94,12 @@ Request requestNew(char * message, size_t length){
         if(strlen(token) == 0){
             break;
         }
-
-        if(sscanf(token, "Host: %s", buf1) == 1){
+        // fprintf(stderr, "TOKEN: %s\n", token);
+        if(sscanf(token, "Host: %[^:]:%d", buf1, &(req->port)) > 0){
+            // fprintf(stderr, "HOST FIELD SPOTTED\n");
             req->hostLen = strlen(buf1) + 1;
             req->host = malloc(req->hostLen);
-            strcpy(req->uri, buf1);
+            strcpy(req->host, buf1);
         }else if(sscanf(token, "Cache-Control: %[^\n]", buf1)){
             char *rest2 = buf1;
             char *tk;
@@ -92,9 +126,10 @@ Request requestNew(char * message, size_t length){
                 tk = strsep(&rest2, ", ");
             }
         }
-        token = strsep(&rest, " ");
+        token = strsep(&rest, "\n");
     }
     free(msg);
+
     return req;
 }
 
@@ -102,6 +137,7 @@ void requestFree(Request req){
     if(req == NULL){
         return;
     }
+    free(req->fullMsg);
     free(req->uri);
     free(req->host);
     free(req);
@@ -114,6 +150,10 @@ httpMethod requestMethod(Request req){
 size_t requestHost(Request req, char **hostp){
     *hostp = req->host;
     return req->hostLen;
+}
+
+int requestPort(Request req){
+    return req->port;
 }
 
 size_t requestUri(Request req, char **urip){
@@ -153,4 +193,10 @@ int requestHeaderValue(Request req, reqHeader hdr){
         default:
             return -1;
     }
+}
+
+
+int requestToCharAry(Request req, char **msgp){
+    *msgp = req->fullMsg;
+    return req->msgLen;
 }

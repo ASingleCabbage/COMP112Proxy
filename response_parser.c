@@ -26,8 +26,31 @@ struct response{
     char flags;
 };
 
-//todo cannot handle case where message header already contains age
+struct sResponse{
+    char *msg;
+    int len;
+};
+
+SResponse responseNewS(char *message, size_t length){
+    SResponse srsp = malloc(length);
+    srsp->msg = malloc(length);
+    memcpy(srsp->msg, message, length);
+    srsp->len = length;
+    return srsp;
+}
+
+void responseFreeS(SResponse srsp){
+    free(srsp->msg);
+    free(srsp);
+}
+
+// TODO cannot handle case where message header already contains age
+// on second thought would this be an issue though? ¯\_(ツ)_/¯
 Response responseNew(char * message, size_t length){
+    if(length <= 0){
+        return NULL;
+    }
+
     char *msg = calloc(1, length);
     memcpy(msg, message, length);
     char *rest = msg;
@@ -90,7 +113,6 @@ Response responseNew(char * message, size_t length){
     // printf("remaining length %d\n", rsp->bodyLen);
     // printf("%s\n", rest);
 
-    //todo may cause issues for binary bodies? insufficient testing here
     memcpy(rsp->body, rest, rsp->bodyLen);
 
     free(msg);
@@ -153,14 +175,14 @@ void responseSetAge(Response rsp, int age){
     rsp->cacheAge = age;
 }
 
-size_t responseToString(Response rsp, char **sp){
+size_t responseToCharAry(Response rsp, char **msgp){
     char agestr[10];
     snprintf(agestr, 10, "%d", rsp->cacheAge);
     int agelen = strlen(agestr);
     int length = agelen + rsp->bodyLen + rsp->headLen + 9;
-    *sp = malloc(length);
+    *msgp = malloc(length);
 
-    char *end = *sp;
+    char *end = *msgp;
     memcpy(end, rsp->head, rsp->headLen - 2);
     end += rsp->headLen - 2;
     memcpy(end, "\r\nAge: ", 7);

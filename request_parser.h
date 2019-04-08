@@ -31,11 +31,16 @@ size_t requestUri(Request req, char **urip);
    returns -1 and sets hostp to NULL if host doesn't exist */
 size_t requestHost(Request req, char **hostp);
 
+int requestPort(Request req);
+
 /* returns true if a cache control header exists in request */
 bool requestHasHeader(Request req, reqHeader hdr);
 
 /* returns value of a given header entry
   -1 if entry not in header or has no value (e.g. cache-control : no-cache)*/
 int requestHeaderValue(Request req, reqHeader hdr);
+
+/* read only */
+int requestToCharAry(Request req, char **msgp);
 
 #endif /* REQUEST_PARSER */

@@ -91,7 +91,7 @@ int main(){
         responseSetAge(rsp, 5);
         printf("Status: %d | Age: %d\n", responseStatus(rsp), responseGetAge(rsp));
         char *out;
-        size_t outLen = responseToString(rsp, &out);
+        size_t outLen = responseToCharAry(rsp, &out);
         printf("Response (reported size %lu, strlen %lu):\n%s\n", outLen, strlen(out), out);
         printf("Response field max age : %d\n", responseHeaderValue(rsp, RSP_MAX_AGE));
 

@@ -7,9 +7,15 @@
 //seperate type for response
 typedef struct response *Response;
 
+//SSL support
+typedef struct sResponse *SResponse;
+SResponse responseNewS(char *message, size_t length);
+void responseFreeS(SResponse srsp);
+
 typedef enum {RSP_MAX_AGE, RSP_S_MAX_AGE, RSP_MUST_REVAL, RSP_N_CACHE, RSP_N_STORE, RSP_N_TRANSFORM,
               RSP_PUBLIC, RSP_PRIVATE, RSP_PROXY_REVAL} rspHeader;
 
+/* message can be freed after the call */
 Response responseNew(char * message, size_t length);
 
 void responseFree(Response rsp);
@@ -24,6 +30,6 @@ int responseHeaderValue(Response rsp, rspHeader hdr);
 int responseGetAge(Response rsp);
 void responseSetAge(Response rsp, int age);
 
-size_t responseToString(Response rsp, char **s);
+size_t responseToCharAry(Response rsp, char **msgp);
 
 #endif /* RESPONSE_PARSER */
