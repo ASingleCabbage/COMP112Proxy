@@ -5,18 +5,17 @@
 #include <stdint.h>
 #include <table.h> //Good ol' Hanson; glibc has one too I think, could switch
 
-// #pragma GCC system_header
-// #include "lookup3.c"
-
+// INVARIANT: mappings have to be one to one
 typedef struct dtable *DTable;
-
-/* Doubly mapped table, integer types only (?) */
 
 DTable DTable_new(int hint);
 
-void  DTable_free(DTable dt);
-void DTable_put(DTable dt, uintptr_t key1, uintptr_t key2);
-int DTable_get(DTable dt, uintptr_t key);
-void DTable_remove(DTable dt, uintptr_t key);
+void DTable_free(DTable dt);
+void DTable_put(DTable dt, int clientSock, int serverSock, void *elem);
+void *DTable_get(DTable dt, int sock);
+void *DTable_remove(DTable dt, int clientSock, int serverSock);
+
+// maps on the client table
+void DTable_map(DTable dt, void apply(DTable dt, int clientSock, void *elem, void *cl), void *cl);
 
 #endif /* DOUBLE_TABLE */

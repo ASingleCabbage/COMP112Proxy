@@ -8,7 +8,7 @@ CFLAGS  = -g -Wall -std=gnu11 -Wextra $(IFLAGS)
 
 IFLAGS  = -I/comp/40/include -I/usr/sup/cii40/include/cii
 LDFLAGS = -g -L/comp/40/lib64 -L/usr/sup/cii40/lib64 -lum-dis -lcii
-LDLIBS  = -lcii40 -lm
+LDLIBS  = -lcii40 -lm -lssl -lcrypto
 
 EXECS = test proxy_simple proxy_multiple
 
@@ -20,7 +20,7 @@ test: test.o request_parser.o response_parser.o
 proxy_simple: proxy_simple.o request_parser.o response_parser.o
 	$(CC) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
-proxy_multiple: proxy_multiple.o request_parser.o response_parser.o double_table.o
+proxy_multiple: proxy_multiple.o request_parser.o response_parser.o double_table.o ssl_utils.o
 	$(CC) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
 # To get *any* .o file, compile its .c file with the following rule.

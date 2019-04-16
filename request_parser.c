@@ -7,7 +7,7 @@
 #define FLAG_N_STORE        0x00000004
 #define FLAG_N_TRANSFORM    0x00000008
 #define FLAG_ONLY_IF_CACHED 0x00000010
-#define FIELD_BUFFER_SIZE 50
+#define FIELD_BUFFER_SIZE 512
 
 // TODO parse host and port (check functionality)
 // host is mandatory field in HTTP 1.1?
@@ -95,11 +95,27 @@ Request requestNew(char * message, size_t length){
             break;
         }
         // fprintf(stderr, "TOKEN: %s\n", token);
-        if(sscanf(token, "Host: %[^:]:%d", buf1, &(req->port)) > 0){
+        int startLen;
+        int endLen;
+        int numParsed;
+        if((numParsed = sscanf(token, "Host: %n%[^:]%n:%d", &startLen, buf1, &endLen, &(req->port))) > 0){
+            fprintf(stderr, "%d\n", numParsed);
             // fprintf(stderr, "HOST FIELD SPOTTED\n");
-            req->hostLen = strlen(buf1) + 1;
+            int bufLen;
+            if(numParsed == 1){
+                //probably counting the null terminator as one of the read characters
+                bufLen = endLen - startLen - 1;
+            }else{
+                bufLen = endLen - startLen;
+            }
+            req->hostLen = bufLen + 1;
             req->host = malloc(req->hostLen);
-            strcpy(req->host, buf1);
+            memcpy(req->host, buf1, bufLen);
+            req->host[bufLen] = '\0';
+            fprintf(stderr, "Host field ..%d..\n", bufLen);
+            fprintf(stderr, "Host field ..%s..\n", "test");
+            fprintf(stderr, "Host field ..%s..\n", buf1);
+            fprintf(stderr, "Host field ..%s..\n", req->host);
         }else if(sscanf(token, "Cache-Control: %[^\n]", buf1)){
             char *rest2 = buf1;
             char *tk;
