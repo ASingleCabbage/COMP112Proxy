@@ -30,16 +30,12 @@
 
 // todo maybe define a custom error enum for all the int returns
 // todo consider making a network_util module to reduce clutter
-
-// typedef struct {
-//     SSL *serverSSL;
-//     SSL *clientSSL;
-// } *ConnectGroup;
+// todo operations are currently done in sets of read/writes, so still blocking a bit
 
 int initTcpSock(int port);
 Response getResponse(Request req);
 int connectServer(Request req);
-int readUntilDone(int socket, char **msgp);
+int readMessage(int socket, char **msgp);
 int handleStdin();
 
 int handleSSLTransmit(int sourceSock, SSLState state);
@@ -99,17 +95,15 @@ int main(int argc, char **argv){
     FD_ZERO(&active_fd_set);
     FD_ZERO(&ssl_fd_set);
     FD_SET(mSock, &active_fd_set);
-    // FD_SET(STDIN_FILENO, &active_fd_set);
+    FD_SET(STDIN_FILENO, &active_fd_set);
 
     struct timeval timeSetting;
     timeSetting.tv_sec  = TIMEOUT_SEC;
     timeSetting.tv_usec = 0;
     struct timeval timeout = timeSetting;
 
-    // int destination;
-
-    // SSL_CTX *ctx = initCTX();
-    // loadCerts(ctx, "cert.pem", "key.pem");
+    SSL_CTX *ctx = initCTX();
+    loadCerts(ctx, "cert.pem", "key.pem");
 
     DTable dt = DTable_new(DT_HINT);
 
@@ -168,11 +162,8 @@ int main(int argc, char **argv){
                             FD_SET(serverSock, &active_fd_set);
                             FD_SET(i, &ssl_fd_set);
                             FD_SET(serverSock, &ssl_fd_set);
-
                             DTable_put(dt, i, serverSock, state);
-
                             sendOkConnect(i);
-                            fprintf(stderr, "OK SENT\n");
                         }
                     }
                 }
@@ -190,17 +181,6 @@ int handleStdin(){
     }
     return 0;
 }
-
-// ConnectGroup initConnectGroup(int clientSock, int serverSock, SSL_CTX *ctx){
-//     ConnectGroup cg = malloc(sizeof(*cg));
-//     cg->clientSSL = SSL_new(ctx);
-//     cg->serverSSL = SSL_new(ctx);
-//     SSL_set_fd(cg->clientSSL, clientSock);
-//     SSL_set_fd(cg->serverSSL, serverSock);
-//     //SSL_accept(cg->clientSSL);
-//     SSL_connect(cg->serverSSL);
-//     return cg;
-// }
 
 int handleSSLTransmit(int sourceSock, SSLState state){
     if(state->state == CLIENT_CONNECT){
@@ -229,50 +209,21 @@ int handleSSLTransmit(int sourceSock, SSLState state){
     return 0;
 }
 
-SSLState handleConnect(int clientSock, Request req){
-    fprintf(stderr, "Handling CONNECT\n");
-    SSL_CTX *ctx = initCTX();
-    loadCerts(ctx, "cert.pem", "key.pem");
-
-    fprintf(stderr, "%s\n", "HERE");
-    int serverSock = connectServer(req);
-
-    fprintf(stderr, "%s\n", "HERE");
-
-    fprintf(stderr, "%s\n", "HERE");
+SSLState handleConnect(int clientSock, Request req, SSL_CTX *ctx){
+    int serverSock = connectServer(req); //todo some form of error checking maybe
     return initSSLState(clientSock, serverSock, ctx);
-
-    // char buf[1024];
-    // fprintf(stderr, "Client read\n");
-    // int bytes = SSL_read(clientSSL, buf, sizeof(buf) - 1);
-    // buf[bytes] = '\0';
-    // printf("Client msg: \"%s\"\n", buf);
-    //
-    // SSL_write(serverSSL, buf, bytes);
-    // char *msg;
-    // bytes = readSSLMessage(serverSSL, &msg);
-    // printf("Server msg: \"%s\"\n", msg);
-    // SSL_write(clientSSL, msg , bytes);
-    //
-    // bytes = readSSLMessage(serverSSL, &msg);
-    // printf("Server msg: \"%s\"\n", msg);
-    // SSL_write(clientSSL, msg , bytes);
-
-    // sprintf(reply, HTMLecho, buf);
-    // SSL_write(ssl, reply, strlen(reply));
 }
 
 // todo currently sever read/writes are still blocking connect...some additional
 //      structure required to track connections
 // returns -1 if error occurs, else 0
-int handleClient(int clientSock, SSLState *statep){
+int handleClient(int clientSock, SSLState *statep, SSL_CTX *ctx){
     char *incoming;
-    int n = readUntilDone(clientSock, &incoming);
+    int n = readMessage(clientSock, &incoming);
     if(n == 0){
-       //fprintf(stderr, "Reading nothing from socket %d\n", socket);
         return -1;
     }else if(n < 0){
-       //fprintf(stderr, "Error when reading from socket %d\n", socket);
+        fprintf(stderr, "Error when reading from socket %d\n", socket);
         return -1;
     }
 
@@ -288,7 +239,7 @@ int handleClient(int clientSock, SSLState *statep){
     char *rspString; //not actually c string format, change name?
     int rspLen;
     if(requestMethod(req) == CONNECT){
-        *statep = handleConnect(clientSock, req);
+        *statep = handleConnect(clientSock, req, ctx);
     }else{
         *statep = NULL;
         Response rsp = getResponse(req);
@@ -313,7 +264,7 @@ Response getResponse(Request req){
     }
 
     char *reply;
-    int replen = readUntilDone(outSock, &reply);
+    int replen = readMessage(outSock, &reply);
     close(outSock);
     return responseNew(reply, replen);
 }
@@ -361,17 +312,15 @@ int connectServer(Request req){
 }
 
 /* Notice: function does memory allocation on msg */
-int readUntilDone(int socket, char ** msgp){
+int readMessage(int socket, char ** msgp){
     char *buffer = calloc(BUF_SIZE, 1);
     int bufsize = BUF_SIZE;
     int msglen = 0;
     int n = read(socket, buffer, BUF_SIZE);
     if(n < 0){
-       //fprintf(stderr, "ERROR failed to read from outgoing socket\n");
+        fprintf(stderr, "ERROR 1 failed to read from outgoing socket\n");
         return -1;
     }
-
-   //fprintf(stderr, "reading %d/%d bytes\n", n, bufsize);
 
     msglen += n;
 
@@ -379,9 +328,8 @@ int readUntilDone(int socket, char ** msgp){
         char buffest[BUF_SIZE];
         bzero(buffest, BUF_SIZE);
         n = read(socket, buffest, BUF_SIZE);
-       //fprintf(stderr, "reading %d/%d bytes\n", n, bufsize);
         if(n < 0){
-           //fprintf(stderr, "ERROR failed to read from outgoing socket\n");
+            fprintf(stderr, "ERROR 2 failed to read from outgoing socket\n");
             return -1;
         }else if(n == 0){
             break;
