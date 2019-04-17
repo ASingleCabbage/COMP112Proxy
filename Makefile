@@ -20,7 +20,7 @@ test: test.o request_parser.o response_parser.o
 proxy_simple: proxy_simple.o request_parser.o response_parser.o
 	$(CC) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
-proxy_multiple: proxy_multiple.o request_parser.o response_parser.o double_table.o ssl_utils.o
+proxy_multiple: proxy_multiple.o request_parser.o response_parser.o double_table.o ssl_utils.o write_buffer.o
 	$(CC) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
 # To get *any* .o file, compile its .c file with the following rule.

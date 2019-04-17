@@ -22,9 +22,29 @@ struct ssl_connection{
     time_t lastTransmit;    //used to close timed out connections
 };
 
-typedef struct ssl_connection *SSLState;
+typedef struct ssl_connection *SSLState; //rename for all types of connection
+
+struct plain_connection{
+    connectType type;
+    connectState state;
+    int clientSock;
+    int serverSock;
+    char *partial;
+    int partialLen;
+    int remainLen;
+    time_t lastTransmit;
+};
+
+typedef struct plain_connection *PlainState; //rename for all types of connection
+
+typedef struct {
+    connectType type;
+    connectState state;
+} *GenericState;
 
 SSLState initSSLState(int clientSock, int serverSock, SSL_CTX *ctx);
+
+PlainState initPlainState(int clientSock, int serverSock);
 
 int forwardEncrypted();
 

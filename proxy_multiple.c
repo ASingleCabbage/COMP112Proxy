@@ -9,6 +9,7 @@
 #include <string.h>
 #include <strings.h>
 #include <unistd.h>
+#include <assert.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -21,6 +22,7 @@
 #include "response_parser.h"
 #include "ssl_utils.h"
 #include "double_table.h"
+#include "write_buffer.h"
 
 #define LISTEN_BACKLOG 0
 #define BUF_SIZE 1024
@@ -31,16 +33,24 @@
 // todo maybe define a custom error enum for all the int returns
 // todo consider making a network_util module to reduce clutter
 // todo operations are currently done in sets of read/writes, so still blocking a bit
+/* implement some sort of write queue:
+        once connection to server is established, add server socket to read_fd_set and write_fd_set
+        add outgoing message into table (queue is blocking), along with destination info
+        check if i ISSET of write_fd_set in select, and transmit its message
+*/
 
+// some function to differentiate between request or response header
 int initTcpSock(int port);
-Response getResponse(Request req);
+// Response getResponse(Request req);
 int connectServer(Request req);
 int readMessage(int socket, char **msgp);
 int handleStdin();
 
-int handleSSLTransmit(int sourceSock, SSLState state);
+int handleSSLRead(int sourceSock, SSLState state, WriteBuffer wb, fd_set *write_fd_set);
 
-int handleClient(int socket, SSLState *statep);
+int handleRead(int socket, GenericState *statep, SSL_CTX *ctx, WriteBuffer wb, DTable dt);
+
+int handleWrite(int destSock, WriteEntry we, DTable dt);
 
 void errExit(char *msg){
     perror(msg);
@@ -76,9 +86,9 @@ int initTcpSock(int port){
     return sock;
 }
 
-int sendOkConnect(int clientSock){
+void queueOkConnect(int destSock, WriteBuffer wb){
     char *rspString = strdup("HTTP/1.1 200 Connection established\r\n\r\n");
-    return write(clientSock, rspString, strlen(rspString));
+    WBuf_put(wb, HTTP_TYPE, destSock, rspString, strlen(rspString));
 }
 
 int main(int argc, char **argv){
@@ -90,10 +100,11 @@ int main(int argc, char **argv){
     int mSock = initTcpSock(port);
     printf("Server running on address %d port %d\n", INADDR_ANY, port);
 
-    fd_set active_fd_set, read_fd_set, ssl_fd_set;
+    fd_set active_fd_set, read_fd_set, write_fd_set, ssl_fd_set;
 
     FD_ZERO(&active_fd_set);
-    FD_ZERO(&ssl_fd_set);
+    FD_ZERO(&write_fd_set);
+    FD_ZERO(&ssl_fd_set);       //todo replace the functionality of ssl_fd_set with state types in dt
     FD_SET(mSock, &active_fd_set);
     FD_SET(STDIN_FILENO, &active_fd_set);
 
@@ -106,14 +117,25 @@ int main(int argc, char **argv){
     loadCerts(ctx, "cert.pem", "key.pem");
 
     DTable dt = DTable_new(DT_HINT);
+    WriteBuffer wb = WBuf_new(DT_HINT);
+
+    int remaining, n;
+    WriteEntry we;
 
     while(true){
        fprintf(stderr, "READY\n");
 
         read_fd_set = active_fd_set;
 
-        int n = select(FD_SETSIZE, &read_fd_set, NULL, NULL, &timeout);
+        n = select(FD_SETSIZE, &read_fd_set, &write_fd_set, NULL, &timeout);
         if(n < 0){
+            for (int i = 0; i < FD_SETSIZE; i++) {
+                if(FD_ISSET(i, &read_fd_set))
+                    printf("%d is in read_fd_set\n", i);
+                if(FD_ISSET(i, &write_fd_set))
+                printf("%d is in write_fd_set\n", i);
+            }
+
             errExit("ERROR on select");
         }else if(n == 0){
             timeout = timeSetting;
@@ -130,46 +152,118 @@ int main(int argc, char **argv){
                                carry on */
                             continue;
                         }
+                        fprintf(stderr, "New socket %d connected\n", newSock);
                         FD_SET(newSock, &active_fd_set);
                     }else if(i == STDIN_FILENO){
                         /* handles stdin for debugging and stuff */
                         handleStdin();
                     }else if(FD_ISSET(i, &ssl_fd_set)){
+                        /* all active SSL connections go here */
                         SSLState state = DTable_get(dt, i);
-                        if(handleSSLTransmit(i, state) != 0){
+                        if(handleSSLRead(i, state, wb, &write_fd_set) != 0){
                             int serverSock = SSL_get_fd(state->serverSSL);
                             int clientSock = SSL_get_fd(state->clientSSL);
                             SSL_shutdown(state->serverSSL);
                             SSL_shutdown(state->clientSSL);
                             close(serverSock);
                             close(clientSock);
+                            fprintf(stderr, "Clearing SSL %d %d from set\n", serverSock, clientSock);
                             FD_CLR(serverSock, &active_fd_set);
                             FD_CLR(clientSock, &active_fd_set);
                             FD_CLR(serverSock, &ssl_fd_set);
                             FD_CLR(clientSock, &ssl_fd_set);
-                            DTable_remove(dt, clientSock, serverSock);
+                            FD_CLR(serverSock, &write_fd_set);
+                            FD_CLR(clientSock, &write_fd_set);
+                            SSLState ss = DTable_remove(dt, clientSock, serverSock);
+                            free(ss);
                         }
                     }
                     else{
-                        SSLState state;
-                        int stat;
-                        if((stat = handleClient(i, &state)) < 0){
+                        GenericState state;
+                        int destSock;
+                        if((destSock = handleRead(i, &state, ctx, wb, dt)) < 0){
                             fprintf(stderr, "Closing connection %d\n", i);
-                            close(i);
-                            FD_CLR(i, &active_fd_set);
-                        }else if(state != NULL){
-                            int serverSock = SSL_get_fd(state->serverSSL);
-                            FD_SET(serverSock, &active_fd_set);
+                            // todo close connection on the other size as well
+                            GenericState state = DTable_get(dt, i);
+                            int clientSock;
+                            int serverSock;
+                            if(state->type == SSL_TYPE){
+                                SSLState ss = (SSLState) state;
+                                clientSock = SSL_get_fd(ss->clientSSL);
+                                serverSock = SSL_get_fd(ss->serverSSL);
+                                SSL_shutdown(ss->serverSSL);
+                                SSL_shutdown(ss->clientSSL);
+                            }else{
+                                PlainState ps = (PlainState) state;
+                                clientSock = ps->clientSock;
+                                serverSock = ps->serverSock;
+                            }
+                            fprintf(stderr, "Clearing non SSL %d %d from set\n", serverSock, clientSock);
+                            free(DTable_remove(dt, serverSock, clientSock));
+                            assert(DTable_get(dt, clientSock) == NULL);
+                            assert(DTable_get(dt, serverSock) == NULL);
+                            close(clientSock);
+                            close(serverSock);
+                            FD_CLR(clientSock, &active_fd_set);
+                            FD_CLR(serverSock, &active_fd_set);
+                            FD_CLR(clientSock, &read_fd_set);
+                            FD_CLR(serverSock, &read_fd_set);
+                            FD_CLR(clientSock, &write_fd_set);
+                            FD_CLR(serverSock, &write_fd_set);
+                            WBuf_remove(wb, clientSock);
+                            WBuf_remove(wb, serverSock);
+                        }else if(state != NULL && state->type == SSL_TYPE){
+                            /* Non null states indicate a new connection */
+                            /* CONNECT request: setting up records for SSL connection */
+                            fprintf(stderr, "SSL server connected %d\n", destSock);
+                            FD_SET(destSock, &active_fd_set);
                             FD_SET(i, &ssl_fd_set);
-                            FD_SET(serverSock, &ssl_fd_set);
-                            DTable_put(dt, i, serverSock, state);
-                            sendOkConnect(i);
+                            FD_SET(destSock, &ssl_fd_set);
+                            DTable_put(dt, i, destSock, state);
+
+                            FD_SET(destSock, &write_fd_set);
+                            queueOkConnect(i, wb);
+                        }else if(state != NULL && state->type == HTTP_TYPE){
+                            /* plain HTTP, with write queued */
+                            DTable_put(dt, i, destSock, state);
+                            fprintf(stderr, "plain server connected %d\n", destSock);
+                            FD_SET(destSock, &active_fd_set);
+                            FD_SET(destSock, &write_fd_set);
+                        }else{
+                            /* existing connections */
+                            FD_SET(destSock, &write_fd_set);
                         }
                     }
+                }
+                if((we = WBuf_get(wb, i, &remaining)) != NULL){
+                    if(remaining == 0){
+                        FD_CLR(i, &write_fd_set);
+                    }
+                    fprintf(stderr, "SENDING WRITE to %d with %d remaining\n", i, remaining);
+                    handleWrite(i, we, dt);
                 }
             }
         }
     }
+}
+
+int handleWrite(int destSock, WriteEntry we, DTable dt){
+    int stat;
+    if(we->type == SSL_TYPE){
+        SSLState state = DTable_get(dt, destSock);
+        SSL *destSSL;
+        if(SSL_get_fd(state->serverSSL) == destSock){
+            destSSL = state->serverSSL;
+        }else{
+            destSSL = state->clientSSL;
+        }
+        stat = SSL_write(destSSL, we->message, we->msgLen);
+    }else{
+        stat = write(destSock, we->message, we->msgLen);
+    }
+    free(we->message);
+    free(we);
+    return stat;
 }
 
 int handleStdin(){
@@ -182,7 +276,7 @@ int handleStdin(){
     return 0;
 }
 
-int handleSSLTransmit(int sourceSock, SSLState state){
+int handleSSLRead(int sourceSock, SSLState state, WriteBuffer wb, fd_set *wsp){
     if(state->state == CLIENT_CONNECT){
         SSL_accept(state->clientSSL);
         state->state = CLIENT_READ;
@@ -199,75 +293,101 @@ int handleSSLTransmit(int sourceSock, SSLState state){
     }
     char *msg;
     int bytes = readSSLMessage(source, &msg);
+    fprintf(stderr, "Received SSL\n%s\n", msg);
     if(bytes <= 0){
         return -1;
     }
-    bytes = SSL_write(dest, msg, bytes);
-    if(bytes <= 0){
-        return -1;
-    }
-    return 0;
-}
 
-SSLState handleConnect(int clientSock, Request req, SSL_CTX *ctx){
-    int serverSock = connectServer(req); //todo some form of error checking maybe
-    return initSSLState(clientSock, serverSock, ctx);
+    WBuf_put(wb, SSL_TYPE, SSL_get_fd(dest), msg, bytes);
+    FD_SET(SSL_get_fd(dest), wsp);
+    //
+    // bytes = SSL_write(dest, msg, bytes);
+    // if(bytes <= 0){
+    //     return -1;
+    // }
+    return 0;
 }
 
 // todo currently sever read/writes are still blocking connect...some additional
 //      structure required to track connections
 // returns -1 if error occurs, else 0
-int handleClient(int clientSock, SSLState *statep, SSL_CTX *ctx){
-    char *incoming;
-    int n = readMessage(clientSock, &incoming);
+// returns positive value if write is queued
+
+//use states for all connection
+int handleRead(int sourceSock, GenericState *statep, SSL_CTX *ctx, WriteBuffer wb, DTable dt){
+    char *incoming = NULL;
+    int n = readMessage(sourceSock, &incoming);
     if(n == 0){
         return -1;
     }else if(n < 0){
-        fprintf(stderr, "Error when reading from socket %d\n", socket);
+        fprintf(stderr, "Error when reading from socket %d\n", sourceSock);
         return -1;
     }
 
     fprintf(stderr, "Received\n%s\n", incoming);
 
-    Request req = requestNew(incoming, n);
-    if(req == NULL){
-        fprintf(stderr, "Error when parsing request\n");
-        //use errno to indicate error?
-        return -1;
-    }
+    *statep = NULL;
+    GenericState state = DTable_get(dt, sourceSock);
+    if(state == NULL){
+        /* Fresh connection */
+        fprintf(stderr, "FRESH\n");
+        Request req = requestNew(incoming, n);
 
-    char *rspString; //not actually c string format, change name?
-    int rspLen;
-    if(requestMethod(req) == CONNECT){
-        *statep = handleConnect(clientSock, req, ctx);
+        if(req == NULL){
+            fprintf(stderr, "Error when parsing request\n");
+            //use errno to indicate error?
+            free(incoming);
+            return -1;
+        }
+
+        int destSock = connectServer(req); //todo some form of error checking maybe
+        if(requestMethod(req) == CONNECT){ //todo this assumption (only first message can be CONNECT may cause problems)
+            *statep = (GenericState) initSSLState(sourceSock, destSock, ctx);
+            free(incoming);
+        }else{
+            fprintf(stderr, "WPUT by %d to %d\n", sourceSock, destSock);
+            WBuf_put(wb, HTTP_TYPE, destSock, incoming, n);
+            *statep = (GenericState) initPlainState(sourceSock, destSock);
+        }
+        requestFree(req);
+        return destSock;
+    }else if(state->type == HTTP_TYPE){
+        fprintf(stderr, "EXISTING HTTP\n");
+
+        PlainState ps = (PlainState) state;
+        int destSock;
+        if(ps->clientSock == sourceSock){
+            destSock = ps->serverSock;
+        }else{
+            destSock = ps->clientSock;
+        }
+        WBuf_put(wb, HTTP_TYPE, destSock, incoming, n);
+        return destSock;
     }else{
-        *statep = NULL;
-        Response rsp = getResponse(req);
-        rspLen = responseToCharAry(rsp, &rspString);
-        fprintf(stderr, "Received\n%s\n", rspString);
-        write(clientSock, rspString, rspLen); //todo error handling
-        responseFree(rsp);
+        fprintf(stderr, "Uh oh this is not supposed to be printed (SSL)\n");
+        free(incoming);
+        //Existing SSL transmission
     }
-
-    requestFree(req);
     free(incoming);
-    return 0;
+    fprintf(stderr, "Uh oh this is not supposed to be printed\n");
+    return -1;
 }
 
-Response getResponse(Request req){
-    int outSock = connectServer(req);
-    char *msg;
-    int len = requestToCharAry(req, &msg);
-
-    if(write(outSock, msg, len) < 0){
-        errExit("ERROR failed to write to outbound socket");
-    }
-
-    char *reply;
-    int replen = readMessage(outSock, &reply);
-    close(outSock);
-    return responseNew(reply, replen);
-}
+// entire outbound leg is done here?
+// Response getResponse(Request req){
+//     // int outSock = connectServer(req);
+//     char *msg;
+//     int len = requestToCharAry(req, &msg);
+//
+//     if(write(outSock, msg, len) < 0){
+//         errExit("ERROR failed to write to outbound socket");
+//     }
+//
+//     char *reply;
+//     int replen = readMessage(outSock, &reply);
+//     close(outSock);
+//     return responseNew(reply, replen);
+// }
 
 //returns socket if successful, else -1
 int connectServer(Request req){
@@ -334,11 +454,12 @@ int readMessage(int socket, char ** msgp){
         }else if(n == 0){
             break;
         }
-        msglen += n;
         bufsize += BUF_SIZE;
         buffer = realloc(buffer, bufsize + 1);
-        strncat(buffer, buffest, n);
+        memcpy(buffer + msglen, buffest, n);
+        msglen += n;
     }
+    buffer[msglen] = '\0';
     *msgp = buffer;
     return msglen;
 }

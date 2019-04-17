@@ -99,8 +99,6 @@ Request requestNew(char * message, size_t length){
         int endLen;
         int numParsed;
         if((numParsed = sscanf(token, "Host: %n%[^:]%n:%d", &startLen, buf1, &endLen, &(req->port))) > 0){
-            fprintf(stderr, "%d\n", numParsed);
-            // fprintf(stderr, "HOST FIELD SPOTTED\n");
             int bufLen;
             if(numParsed == 1){
                 //probably counting the null terminator as one of the read characters
@@ -112,10 +110,6 @@ Request requestNew(char * message, size_t length){
             req->host = malloc(req->hostLen);
             memcpy(req->host, buf1, bufLen);
             req->host[bufLen] = '\0';
-            fprintf(stderr, "Host field ..%d..\n", bufLen);
-            fprintf(stderr, "Host field ..%s..\n", "test");
-            fprintf(stderr, "Host field ..%s..\n", buf1);
-            fprintf(stderr, "Host field ..%s..\n", req->host);
         }else if(sscanf(token, "Cache-Control: %[^\n]", buf1)){
             char *rest2 = buf1;
             char *tk;

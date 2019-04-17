@@ -2,6 +2,7 @@
 #include <table.h>
 #include <sys/time.h>
 #include <assert.h>
+#include <stdio.h>
 
 struct dtable{
     Table_T clientT;
@@ -16,9 +17,7 @@ static int cmpInt(const uintptr_t a, const uintptr_t b){
 
 static unsigned hashWrap(const uintptr_t val){
     // Knuth's multiplicative method:
-    return val*2654435761 % 2^32;
-
-    // return hashlittle(key, 32, time(NULL));
+    return val * 2654435761 % 2^32;
 }
 
 DTable DTable_new(int hint){
@@ -51,6 +50,11 @@ void *DTable_get(DTable dt, int sock){
 
 void *DTable_remove(DTable dt, int clientSock, int serverSock){
     void *val = Table_remove(dt->clientT, (void *)(uintptr_t)clientSock);
+    if(val == NULL){
+        Table_remove(dt->clientT, (void *)(uintptr_t)serverSock);
+        val = Table_remove(dt->serverT, (void *)(uintptr_t)clientSock);
+        return val;
+    }
     Table_remove(dt->serverT, (void *)(uintptr_t)serverSock);
     return val;
 }

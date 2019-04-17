@@ -16,6 +16,6 @@ void *DTable_get(DTable dt, int sock);
 void *DTable_remove(DTable dt, int clientSock, int serverSock);
 
 // maps on the client table
-void DTable_map(DTable dt, void apply(DTable dt, int clientSock, void *elem, void *cl), void *cl);
+void DTable_map(DTable dt, void apply(DTable dt, int clientSock, void **elem, void *cl), void *cl);
 
 #endif /* DOUBLE_TABLE */
