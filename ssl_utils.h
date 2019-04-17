@@ -42,6 +42,10 @@ typedef struct {
     connectState state;
 } *GenericState;
 
+void generateCerts(SSL **sslp, SSL *source);
+
+void ShowCerts(SSL* ssl);
+
 SSLState initSSLState(int clientSock, int serverSock, SSL_CTX *ctx);
 
 PlainState initPlainState(int clientSock, int serverSock);
