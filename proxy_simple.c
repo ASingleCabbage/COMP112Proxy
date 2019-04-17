@@ -18,6 +18,7 @@
 
 #include "request_parser.h"
 #include "response_parser.h"
+#include "caching.h"
 
 #define LISTEN_BACKLOG 0
 #define BUF_SIZE 1024
@@ -25,7 +26,7 @@
 #define DEFAULT_SECURE_PORT 80
 
 int initTcpSock(int port);
-Response getResponse(Request req);
+Response getResponse(Request req, Cache csh);
 int getSecureResponse(Request req, char **rspp);
 
 
@@ -44,6 +45,8 @@ int main(int argc, char **argv){
 
     int port = (int)strtol(argv[1], NULL, 10);
     int mSock = initTcpSock(port);
+
+    Cache csh = cache_new();
 
     printf("Server running on address %d port %d\n", INADDR_ANY, port);
 
@@ -66,7 +69,7 @@ int main(int argc, char **argv){
         if(requestMethod(req) == CONNECT){
             rspLen = getSecureResponse(req, &rspString);
         }else{
-            Response rsp = getResponse(req);
+            Response rsp = getResponse(req, csh);
             rspLen = responseToCharAry(rsp, &rspString);
         }
 
@@ -116,7 +119,15 @@ int initTcpSock(int port){
     return sock;
 }
 
-Response getResponse(Request req){
+Response getResponse(Request req, Cache csh){
+
+    // Attempt to get response from cache
+    Response rsp;
+    rsp = get_from_cache(csh, req);
+    if (rsp != NULL)
+        return rsp;
+    // Otherwise, continue to get from server
+
     /* creating outbout socket */
     int outSock = socket(AF_INET, SOCK_STREAM, 0);
     if(outSock < 0){
@@ -168,7 +179,9 @@ Response getResponse(Request req){
     // fprintf(stderr, "Reply received\n");
     close(outSock);
 
-    return responseNew(reply, replen);
+    rsp = responseNew(reply, replen);
+    cache_add(csh, req, rsp);
+    return rsp;
 }
 
 int getSecureResponse(Request req, char **rspp){

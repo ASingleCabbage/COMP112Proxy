@@ -22,7 +22,7 @@ struct response{
     int status;
     int maxAge;
     int sMaxAge;
-    int cacheAge;
+    int cacheAge; // current time (seconds) when response was cached
     char flags;
 };
 
