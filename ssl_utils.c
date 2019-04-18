@@ -17,19 +17,19 @@
 
 #include<assert.h>
 
-#define BUF_SIZE 1024
+#define BUF_SIZE 1500
 
 SSLState initSSLState(int clientSock, int serverSock, SSL_CTX *ctx){
     SSLState state = calloc(1, sizeof(struct ssl_connection));
     state->clientSSL = SSL_new(ctx);
-    fprintf(stderr, "CLIENT CERTS\n");
+    // fprintf(stderr, "CLIENT CERTS\n");
     // showCerts(state->clientSSL);
 
     state->serverSSL = SSL_new(ctx);
     SSL_set_fd(state->clientSSL, clientSock);
     SSL_set_fd(state->serverSSL, serverSock);
     SSL_connect(state->serverSSL);
-    fprintf(stderr, "SERVER CERTS\n");
+    // fprintf(stderr, "SERVER CERTS\n");
     // ShowCerts(state->serverSSL);
 
     state->type = SSL_TYPE;
@@ -52,9 +52,14 @@ void copy_ext(X509 *cert, X509 *sourceCert, int nid){
 }
 
 void generateCerts(SSL **sslp, SSL *source){
-    SSL_set_options(*sslp, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
+    assert(source != NULL && *sslp != NULL);
+    // SSL_set_options(*sslp, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
 
     X509 *sourceX509 = SSL_get_peer_certificate(source); //do we need to repackage the thing?
+    if(sourceX509 == NULL){
+        return;
+    }
+
     // fprintf(stderr, "SOURCE ");
     // showFields(sourceX509);
 
@@ -70,9 +75,16 @@ void generateCerts(SSL **sslp, SSL *source){
 
     X509 *cert = X509_new();
 
-    // ASN1_INTEGER_set(X509_get_serialNumber(sourceX509), time(NULL));
+    int serial = rand();
+    fprintf(stderr, "SERIAL using %d\n", serial);
+    ASN1_INTEGER_set(X509_get_serialNumber(cert), serial);
 
-    X509_set_serialNumber(cert, X509_get_serialNumber(sourceX509));
+    // ASN1_INTEGER *serial = X509_get_serialNumber(sourceX509);
+    // if(serial == NULL){
+    //     fprintf(stderr, "Error getting serial number\n");
+    // }
+    //
+    // X509_set_serialNumber(cert, serial);
 
 
     //todo serial issues

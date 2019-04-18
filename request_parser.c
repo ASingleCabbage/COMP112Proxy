@@ -79,11 +79,8 @@ Request requestNew(char * message, size_t length){
     strcpy(req->uri, token);
 
     char uriNoPort[FIELD_BUFFER_SIZE];
-    if(sscanf(token, "%[^:]:%d", uriNoPort, &(req->port)) < 2){
-        fprintf(stderr, "No port specified\n");
-    }else{
-        fprintf(stderr, "Port %d specified\n", req->port);
-    }
+    sscanf(token, "%[^:]:%d", uriNoPort, &(req->port));
+
 
     token = strsep(&rest, "\n"); /* HTTP version, dropping field */
     token = strsep(&rest, "\n");

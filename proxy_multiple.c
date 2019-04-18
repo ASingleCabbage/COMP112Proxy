@@ -24,11 +24,11 @@
 #include "double_table.h"
 #include "write_buffer.h"
 
-#define LISTEN_BACKLOG 0
-#define BUF_SIZE 1024
+#define LISTEN_BACKLOG 6
+#define BUF_SIZE 1500
 #define DEFAULT_PORT 80
-#define TIMEOUT_SEC 30
-#define DT_HINT 40
+#define TIMEOUT_SEC 60
+#define DT_HINT 60
 
 // todo maybe define a custom error enum for all the int returns
 // todo consider making a network_util module to reduce clutter
@@ -113,6 +113,7 @@ int main(int argc, char **argv){
     timeSetting.tv_usec = 0;
     struct timeval timeout = timeSetting;
 
+    // initGlobal();
     SSL_CTX *ctx = initCTX();
     // loadCerts(ctx, "server.crt", "server.key");
 
@@ -166,8 +167,12 @@ int main(int argc, char **argv){
                             int clientSock = SSL_get_fd(state->clientSSL);
                             switch (err) {
                                 case SSL_ERROR_ZERO_RETURN:
-                                    SSL_shutdown(state->serverSSL);
-                                    SSL_shutdown(state->clientSSL);
+                                    //this shutdown step sometimes causes broken pipe error
+                                    if(serverSock == i){
+                                        SSL_shutdown(state->clientSSL);
+                                    }else{
+                                        SSL_shutdown(state->serverSSL);
+                                    }
                                     fprintf(stderr, "ZERO_RETURN, normal shutdown\n");
                                     break;
                                 case SSL_ERROR_SYSCALL:
@@ -271,14 +276,20 @@ int handleWrite(int destSock, WriteEntry we, DTable dt){
     int stat;
     if(we->type == SSL_TYPE){
         SSLState state = DTable_get(dt, destSock);
+        if(state == NULL){
+            fprintf(stderr, "HANDLEWRITE: no DTable entry for %d\n", destSock);
+            return -1;
+        }
         SSL *destSSL;
         if(SSL_get_fd(state->serverSSL) == destSock){
             destSSL = state->serverSSL;
         }else{
             destSSL = state->clientSSL;
         }
+        fprintf(stderr, "Writing to socket %d (ssl)\n", destSock);
         stat = SSL_write(destSSL, we->message, we->msgLen);
     }else{
+        fprintf(stderr, "Writing to socket %d (plain)\n", destSock);
         stat = write(destSock, we->message, we->msgLen);
     }
     free(we->message);
@@ -403,7 +414,7 @@ int connectServer(Request req){
     struct hostent *server = gethostbyname(host);
     if(server == NULL){
         fprintf(stderr, "ERROR cannot find host with name [%s]\n", host);
-        exit(EXIT_FAILURE);
+        return -1;
     }
 
     /* building serveraddr */
