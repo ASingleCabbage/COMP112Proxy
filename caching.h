@@ -2,8 +2,6 @@
 #ifndef COMP112PROXY_CACHING_H
 #define COMP112PROXY_CACHING_H
 
-#include <table.h>
-#include <atom.h>
 #include "response_parser.h"
 #include "request_parser.h"
 
