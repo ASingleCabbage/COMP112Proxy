@@ -18,7 +18,7 @@
 
 #include "request_parser.h"
 #include "response_parser.h"
-#include "caching.h"
+#include "cache.h"
 
 #define LISTEN_BACKLOG 0
 #define BUF_SIZE 1024

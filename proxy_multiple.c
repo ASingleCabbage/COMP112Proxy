@@ -23,6 +23,7 @@
 #include "ssl_utils.h"
 #include "double_table.h"
 #include "write_buffer.h"
+#include "cache.h"
 
 #define LISTEN_BACKLOG 6
 #define BUF_SIZE 1500
@@ -48,7 +49,7 @@ int handleStdin();
 
 int handleSSLRead(int sourceSock, SSLState state, WriteBuffer wb, fd_set *write_fd_set);
 
-int handleRead(int socket, GenericState *statep, SSL_CTX *ctx, WriteBuffer wb, DTable dt);
+int handleRead(int socket, GenericState *statep, SSL_CTX *ctx, WriteBuffer wb, DTable dt, Cache csh);
 
 int handleWrite(int destSock, WriteEntry we, DTable dt);
 
@@ -122,6 +123,7 @@ int main(int argc, char **argv){
 
     int remaining, n;
     WriteEntry we;
+    Cache csh = cache_new();
 
     while(true){
     //    fprintf(stderr, "READY\n");
@@ -198,7 +200,7 @@ int main(int argc, char **argv){
                     else{
                         GenericState state;
                         int destSock;
-                        if((destSock = handleRead(i, &state, ctx, wb, dt)) < 0){
+                        if((destSock = handleRead(i, &state, ctx, wb, dt, csh)) < 0){
                             fprintf(stderr, "Closing connection %d\n", i);
                             // todo close connection on the other size as well
                             GenericState state = DTable_get(dt, i);
@@ -342,7 +344,7 @@ int handleSSLRead(int sourceSock, SSLState state, WriteBuffer wb, fd_set *wsp){
 // returns positive value if write is queued
 
 //use states for all connection
-int handleRead(int sourceSock, GenericState *statep, SSL_CTX *ctx, WriteBuffer wb, DTable dt){
+int handleRead(int sourceSock, GenericState *statep, SSL_CTX *ctx, WriteBuffer wb, DTable dt, Cache csh){
     char *incoming = NULL;
     int n = readMessage(sourceSock, &incoming);
     if(n == 0){
@@ -374,8 +376,23 @@ int handleRead(int sourceSock, GenericState *statep, SSL_CTX *ctx, WriteBuffer w
             free(incoming);
         }else{
             // fprintf(stderr, "WPUT by %d to %d\n", sourceSock, destSock);
-            WBuf_put(wb, HTTP_TYPE, destSock, incoming, n);
-            *statep = (GenericState) initPlainState(sourceSock, destSock);
+
+            // if successfully retrieved from cache, then destsock = sourcesock
+            // incoming (the message associated with socket should be set to the response message
+            Response rsp = get_from_cache(csh, req);
+            if (rsp == NULL) { // could not get file from cache
+                WBuf_put(wb, HTTP_TYPE, destSock, incoming, n);
+                *statep = (GenericState) initPlainState(sourceSock, destSock);
+            } else { // able to serve content from cache
+                char **urip;
+                int uriLen = requestUri(req, urip);
+                (void) uriLen;
+                fprintf(stderr, "Serving: %s from the cache", *urip);
+                char **rspmsg;
+                n = responseToCharAry(rsp, rspmsg);
+                WBuf_put(wb, HTTP_TYPE, sourceSock, *rspmsg, n);
+                *statep = (GenericState) initPlainState(sourceSock, sourceSock);
+            }
         }
         requestFree(req);
         return destSock;
@@ -383,10 +400,13 @@ int handleRead(int sourceSock, GenericState *statep, SSL_CTX *ctx, WriteBuffer w
         // fprintf(stderr, "EXISTING HTTP\n");
         PlainState ps = (PlainState) state;
         int destSock;
+        // if source of connection is the client, set destsock to server location
         if(ps->clientSock == sourceSock){
             destSock = ps->serverSock;
+        // Otherwise, destsock set to client location for response message
         }else{
             destSock = ps->clientSock;
+            Response rsp = responseNew(incoming, n);
         }
         WBuf_put(wb, HTTP_TYPE, destSock, incoming, n);
         return destSock;
