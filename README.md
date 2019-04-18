@@ -1,4 +1,4 @@
-#COMP112 Project by Daniel and Matt#
+# COMP112 Project by Daniel and Matt #
  
  compile with make, and run with ./proxy_multiple [port num]
  
