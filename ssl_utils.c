@@ -11,21 +11,144 @@
 #include <limits.h>
 #include <errno.h>
 
-#define BUF_SIZE 1024
+#include <openssl/x509v3.h>
+#include <openssl/asn1.h>
+#include <openssl/pem.h>
+
+#include<assert.h>
+
+#define BUF_SIZE 1500
 
 SSLState initSSLState(int clientSock, int serverSock, SSL_CTX *ctx){
     SSLState state = calloc(1, sizeof(struct ssl_connection));
     state->clientSSL = SSL_new(ctx);
+    // fprintf(stderr, "CLIENT CERTS\n");
+    // showCerts(state->clientSSL);
+
     state->serverSSL = SSL_new(ctx);
     SSL_set_fd(state->clientSSL, clientSock);
     SSL_set_fd(state->serverSSL, serverSock);
     SSL_connect(state->serverSSL);
+    // fprintf(stderr, "SERVER CERTS\n");
+    // ShowCerts(state->serverSSL);
 
     state->type = SSL_TYPE;
     state->state = CLIENT_CONNECT;
 
     return state;
 }
+
+void showFields(X509 *cert){
+    char *subj = X509_NAME_oneline(X509_get_subject_name(cert), NULL, 0);
+    char *issuer = X509_NAME_oneline(X509_get_issuer_name(cert), NULL, 0);
+    fprintf(stderr, "CERTIFICATE:\n%s\n%s\n", subj, issuer);
+}
+
+void copy_ext(X509 *cert, X509 *sourceCert, int nid){
+    int crit;
+    void *san = X509_get_ext_d2i(sourceCert, nid, &crit, NULL);
+
+    X509_add1_ext_i2d(cert, nid, san, crit, X509V3_ADD_REPLACE);
+}
+
+void generateCerts(SSL **sslp, SSL *source){
+    assert(source != NULL && *sslp != NULL);
+    // SSL_set_options(*sslp, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
+
+    X509 *sourceX509 = SSL_get_peer_certificate(source); //do we need to repackage the thing?
+    if(sourceX509 == NULL){
+        return;
+    }
+
+    // fprintf(stderr, "SOURCE ");
+    // showFields(sourceX509);
+
+    FILE *pkeyFile = fopen("server.key", "r");
+    RSA *rootRsa = PEM_read_RSAPrivateKey(pkeyFile , NULL, 0, NULL);
+    fclose(pkeyFile);
+    RSA *rsa = RSA_generate_key(2048, RSA_F4, NULL, NULL);
+
+    EVP_PKEY *pkey = EVP_PKEY_new();
+    EVP_PKEY_assign_RSA(pkey, rsa);
+    EVP_PKEY *rkey = EVP_PKEY_new();
+    EVP_PKEY_assign_RSA(rkey, rootRsa);
+
+    X509 *cert = X509_new();
+
+    int serial = rand();
+    fprintf(stderr, "SERIAL using %d\n", serial);
+    ASN1_INTEGER_set(X509_get_serialNumber(cert), serial);
+
+    // ASN1_INTEGER *serial = X509_get_serialNumber(sourceX509);
+    // if(serial == NULL){
+    //     fprintf(stderr, "Error getting serial number\n");
+    // }
+    //
+    // X509_set_serialNumber(cert, serial);
+
+
+    //todo serial issues
+    // uint64_t serial;
+    // ASN1_INTEGER_get_uint64(&serial, X509_get_serialNumber(cert));
+    // fprintf(stderr, "SERIAL %lu\n", serial);
+
+
+    X509_gmtime_adj(X509_get_notBefore(cert), 0);
+    X509_gmtime_adj(X509_get_notAfter(cert), 31536000L);
+
+    X509_set_pubkey(cert, pkey);
+    X509_NAME *subject = X509_NAME_dup(X509_get_subject_name(sourceX509));
+    X509_set_subject_name(cert, subject);
+
+    X509_NAME * issuer = X509_get_issuer_name(cert);
+    X509_NAME_add_entry_by_txt(issuer, "C",  MBSTRING_ASC, (unsigned char *)"US", -1, -1, 0);
+    X509_NAME_add_entry_by_txt(issuer, "ST",  MBSTRING_ASC, (unsigned char *)"Massachusetts", -1, -1, 0);
+    X509_NAME_add_entry_by_txt(issuer, "L",  MBSTRING_ASC, (unsigned char *)"Medford", -1, -1, 0);
+    X509_NAME_add_entry_by_txt(issuer, "O",  MBSTRING_ASC, (unsigned char *)"Totally not evil inc", -1, -1, 0);
+    X509_NAME_add_entry_by_txt(issuer, "OU",  MBSTRING_ASC, (unsigned char *)"Web division", -1, -1, 0);
+    X509_NAME_add_entry_by_txt(issuer, "CN", MBSTRING_ASC, (unsigned char *)"Big brother", -1, -1, 0);
+
+    copy_ext(cert, sourceX509, NID_subject_alt_name);
+
+    // fprintf(stderr, "DEST ");
+    // showFields(cert);
+
+    X509_sign(cert, rkey, EVP_sha256());
+
+    SSL_use_certificate(*sslp, cert);
+    SSL_use_PrivateKey(*sslp, pkey);
+    // SSL_use_PrivateKey_file(*sslp, "server.key", SSL_FILETYPE_PEM);
+    if (!SSL_check_private_key(*sslp))
+    {
+        fprintf(stderr, "Generate Certificate error\n");
+        exit(EXIT_FAILURE);
+    }
+
+    FILE *out = fopen("check.crt","w");
+    PEM_write_X509(out, cert);
+    fclose(out);
+}
+
+void showCerts(SSL* ssl)
+{   X509 *cert;
+    char *line;
+
+    cert = SSL_get_peer_certificate(ssl);	/* get the server's certificate */
+    if ( cert != NULL )
+    {
+        printf("Server certificates:\n");
+        line = X509_NAME_oneline(X509_get_subject_name(cert), 0, 0);
+        printf("Subject: %s\n", line);
+        free(line);							/* free the malloc'ed string */
+        line = X509_NAME_oneline(X509_get_issuer_name(cert), 0, 0);
+        printf("Issuer: %s\n", line);
+        free(line);							/* free the malloc'ed string */
+        X509_free(cert);					/* free the malloc'ed certificate copy */
+    }
+    else
+        printf("No certificates.\n");
+}
+
 
 PlainState initPlainState(int clientSock, int serverSock){
     PlainState state = calloc(1, sizeof(struct plain_connection));
@@ -96,12 +219,12 @@ int readSSLMessage(SSL *ssl, char ** msgp){
         fprintf(stderr, "ERROR when reading SSL message\n");
         return n;
     }
-    fprintf(stderr, "reading %d/%d bytes\n", n, bufsize);
+    // fprintf(stderr, "reading %d/%d bytes\n", n, bufsize);
 
     msglen += n;
     while(BUF_SIZE == n){
         char buffest[BUF_SIZE];
-        fprintf(stderr, "Trying to read\n");
+        // fprintf(stderr, "Trying to read\n");
         n = SSL_read(ssl, buffest, BUF_SIZE);
 
         if(n < 0){
@@ -109,7 +232,7 @@ int readSSLMessage(SSL *ssl, char ** msgp){
             return n;
         }
 
-        fprintf(stderr, "reading %d/%d bytes\n", n, bufsize);
+        // fprintf(stderr, "reading %d/%d bytes\n", n, bufsize);
         bufsize += BUF_SIZE;
         buffer = realloc(buffer, bufsize + 1);
         memcpy(buffer + msglen, buffest, n);
