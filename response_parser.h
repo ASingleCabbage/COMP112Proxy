@@ -13,7 +13,7 @@ SResponse responseNewS(char *message, size_t length);
 void responseFreeS(SResponse srsp);
 
 typedef enum {RSP_MAX_AGE, RSP_S_MAX_AGE, RSP_MUST_REVAL, RSP_N_CACHE, RSP_N_STORE, RSP_N_TRANSFORM,
-              RSP_PUBLIC, RSP_PRIVATE, RSP_PROXY_REVAL} rspHeader;
+              RSP_PUBLIC, RSP_PRIVATE, RSP_PROXY_REVAL, RSP_CONTENT_LEN} rspHeader;
 
 /* message can be freed after the call */
 Response responseNew(char * message, size_t length);

@@ -17,6 +17,7 @@
 struct response{
     char *head;
     char *body;
+    int contentLen;
     int headLen;
     int bodyLen;
     int status;
@@ -57,6 +58,7 @@ Response responseNew(char * message, size_t length){
     char *token;
     Response rsp = calloc(1, sizeof(struct response));
 
+    rsp->contentLen = -1;
     rsp->maxAge = -1;
     rsp->sMaxAge = -1;
 
@@ -67,6 +69,7 @@ Response responseNew(char * message, size_t length){
 
     token = strsep(&rest, "\n");
     char buf1[FIELD_BUFFER_SIZE];
+    int num1;
     while(token != NULL){
         if(strlen(token) <= 1){
             break;
@@ -100,6 +103,8 @@ Response responseNew(char * message, size_t length){
                 }
                 tk = strsep(&br, " ");
             }
+        }else if(sscanf(token, "Content-Length: %d", &num1)){
+            rsp->contentLen = num1;
         }
         token = strsep(&rest, "\n");
     }
@@ -163,6 +168,8 @@ int responseHeaderValue(Response rsp, rspHeader hdr){
             return rsp->maxAge;
         case RSP_S_MAX_AGE:
             return rsp->sMaxAge;
+        case RSP_CONTENT_LEN:
+            return rsp->contentLen;
         default:
             return -1;
     }

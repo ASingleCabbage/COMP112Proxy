@@ -9,7 +9,7 @@ typedef struct request *Request;
 
 // NOTICE max stale has optional value that goes with it
 typedef enum {REQ_MAX_AGE, REQ_MAX_STALE, REQ_MIN_FRESH, REQ_N_CACHE, REQ_N_STORE, REQ_N_TRANSFORM,
-              REQ_ONLY_IF_CACHED } reqHeader;
+              REQ_ONLY_IF_CACHED, REQ_CONTENT_LEN } reqHeader;
 
 // only contains method needed to be supported in the assignment
 typedef enum {GET, CONNECT, OTHER} httpMethod;

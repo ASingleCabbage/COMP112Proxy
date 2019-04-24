@@ -16,22 +16,22 @@
 #include <openssl/pem.h>
 
 #include<assert.h>
+#include "pcg_basic.h"
 
 #define BUF_SIZE 1500
 
 SSLState initSSLState(int clientSock, int serverSock, SSL_CTX *ctx){
     SSLState state = calloc(1, sizeof(struct ssl_connection));
     state->clientSSL = SSL_new(ctx);
-    // fprintf(stderr, "CLIENT CERTS\n");
-    // showCerts(state->clientSSL);
-
     state->serverSSL = SSL_new(ctx);
+    state->request = NULL;
+    state->response = NULL;
+    state->partial = NULL;
+    state->partialLen = -1;
+    state->remainLen = -1;
     SSL_set_fd(state->clientSSL, clientSock);
     SSL_set_fd(state->serverSSL, serverSock);
     SSL_connect(state->serverSSL);
-    // fprintf(stderr, "SERVER CERTS\n");
-    // ShowCerts(state->serverSSL);
-
     state->type = SSL_TYPE;
     state->state = CLIENT_CONNECT;
 
@@ -75,8 +75,8 @@ void generateCerts(SSL **sslp, SSL *source){
 
     X509 *cert = X509_new();
 
-    int serial = rand();
-    fprintf(stderr, "SERIAL using %d\n", serial);
+    int serial = pcg32_random();
+    // fprintf(stderr, "SERIAL using %d\n", serial);
     ASN1_INTEGER_set(X509_get_serialNumber(cert), serial);
 
     // ASN1_INTEGER *serial = X509_get_serialNumber(sourceX509);
@@ -93,7 +93,7 @@ void generateCerts(SSL **sslp, SSL *source){
     // fprintf(stderr, "SERIAL %lu\n", serial);
 
 
-    X509_gmtime_adj(X509_get_notBefore(cert), 0);
+    X509_gmtime_adj(X509_get_notBefore(cert), -30);
     X509_gmtime_adj(X509_get_notAfter(cert), 31536000L);
 
     X509_set_pubkey(cert, pkey);
@@ -149,14 +149,30 @@ void showCerts(SSL* ssl)
         printf("No certificates.\n");
 }
 
-
 PlainState initPlainState(int clientSock, int serverSock){
     PlainState state = calloc(1, sizeof(struct plain_connection));
     state->clientSock = clientSock;
     state->serverSock = serverSock;
+    state->request = NULL;
+    state->response = NULL;
+    state->partial = NULL;
+    state->partialLen = -1;
+    state->remainLen = -1;
     state->type = HTTP_TYPE;
     state->state = CLIENT_CONNECT;
     return state;
+}
+
+void attachPartial(GenericState gs, char *msg, int len){
+    if(gs->partial == NULL){
+        gs->partial = msg;
+        gs->partialLen = len;
+    }else{
+        gs->partial = realloc(gs->partial, gs->partialLen + len + 1);
+        memcpy(gs->partial + gs->partialLen, msg, len);
+        gs->partialLen += len;
+        (gs->partial)[gs->partialLen] = '\0';
+    }
 }
 
 void sslErrorExit(){
@@ -193,6 +209,9 @@ SSL_CTX *initCTX(){
     if(ctx == NULL){
         sslErrorExit();
     }
+
+    //seeding RNG
+    pcg32_srandom(rand(), rand());
     return ctx;
 }
 

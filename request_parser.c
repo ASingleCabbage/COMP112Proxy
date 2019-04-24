@@ -17,6 +17,7 @@ struct request{
     char *fullMsg;
     char *uri;
     char *host;
+    int contentLen;
     int msgLen;
     int uriLen;
     int hostLen;
@@ -57,6 +58,7 @@ Request requestNew(char * message, size_t length){
 
     //initialize request with proper values
     req->host = NULL;
+    req->contentLen = -1;
     req->hostLen = -1;
     req->port = -1;
     req->maxAge = -1;
@@ -86,6 +88,7 @@ Request requestNew(char * message, size_t length){
     token = strsep(&rest, "\n");
 
     char buf1[FIELD_BUFFER_SIZE];
+    int num1;
     //todo check if possible to break before reaching body
     while(token != NULL){
         if(strlen(token) == 0){
@@ -95,7 +98,7 @@ Request requestNew(char * message, size_t length){
         int startLen;
         int endLen;
         int numParsed;
-        if((numParsed = sscanf(token, "Host: %n%[^:]%n:%d", &startLen, buf1, &endLen, &(req->port))) > 0){
+        if((numParsed = sscanf(token, "Host: %n%[^:]%n:%d", &startLen, buf1, &endLen, &(req->port)))){
             int bufLen;
             if(numParsed == 1){
                 //probably counting the null terminator as one of the read characters
@@ -107,6 +110,8 @@ Request requestNew(char * message, size_t length){
             req->host = malloc(req->hostLen);
             memcpy(req->host, buf1, bufLen);
             req->host[bufLen] = '\0';
+        }else if(sscanf(token, "Content-Length: %d", &num1)){
+            req->contentLen = num1;
         }else if(sscanf(token, "Cache-Control: %[^\n]", buf1)){
             char *rest2 = buf1;
             char *tk;
@@ -197,6 +202,8 @@ int requestHeaderValue(Request req, reqHeader hdr){
             return req->maxStale;
         case REQ_MIN_FRESH:
             return req->minFresh;
+        case REQ_CONTENT_LEN:
+            return req->contentLen;
         default:
             return -1;
     }
