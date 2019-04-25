@@ -46,8 +46,8 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
-#include "request_parser.h"
-#include "response_parser.h"
+#include "request_parser_dynamic.h"
+#include "response_parser_dynamic.h"
 #include "ssl_utils.h"
 #include "double_table.h"
 #include "write_buffer.h"
@@ -363,7 +363,6 @@ int handleSSLRead(int sourceSock, SSLState state, WriteBuffer wb, fd_set *wsp){
     }
     SSL *source;
     SSL *dest;
-    bool subsequentClientRead = false;
     if(SSL_get_fd(state->clientSSL) == sourceSock){
         if(state->state == SERVER_READ){
             /* Subsequent requests on same connection; clearing out old request for new one */
@@ -399,7 +398,7 @@ int handleSSLRead(int sourceSock, SSLState state, WriteBuffer wb, fd_set *wsp){
             //debugging, remove when deploying
             fprintf(stderr, "Multiple client requests...SSL\n");
             char *ogReq;
-            requestToCharAry(state->request, &ogReq);
+            requestToString(state->request, &ogReq);
             fprintf(stderr, "Original:\n%s\n", ogReq);
             fprintf(stderr, "New:\n%s\n", msg);
             exit(EXIT_FAILURE);
@@ -440,8 +439,6 @@ int handleRead(int sourceSock, GenericState *statep, SSL_CTX *ctx, WriteBuffer w
             free(incoming);
             return -1;
         }
-        int contentLen = requestHeaderValue(req, REQ_CONTENT_LEN);
-        fprintf(stderr, "Content Length Field: %d\n", contentLen);
         /*
             Caching: get url as key from req
             If exists in cache, retrieve and add to write buffer,
@@ -480,7 +477,7 @@ int handleRead(int sourceSock, GenericState *statep, SSL_CTX *ctx, WriteBuffer w
                 writeLog("\n", "a");
                 writeLog("Subsequent original request is...\n", "a");
                 char *ogMsg;
-                requestToCharAry(state->request, &ogMsg);
+                requestToString(state->request, &ogMsg);
                 writeLog(ogMsg, "a");
                 writeLog("\n", "a");
             }else{
@@ -490,7 +487,7 @@ int handleRead(int sourceSock, GenericState *statep, SSL_CTX *ctx, WriteBuffer w
                 writeLog("\n", "a");
                 writeLog("Multiple original request is...\n", "a");
                 char *ogMsg;
-                requestToCharAry(state->request, &ogMsg);
+                requestToString(state->request, &ogMsg);
                 writeLog(ogMsg, "a");
                 writeLog("\n", "a");
             }
@@ -522,8 +519,7 @@ int connectServer(Request req){
     }
 
     /* getting host via DNS */
-    char *host;
-    requestHost(req, &host);
+    char *host = requestHost(req);
     struct hostent *server = gethostbyname(host);
     if(server == NULL){
         fprintf(stderr, "ERROR cannot find host with name [%s]\n", host);

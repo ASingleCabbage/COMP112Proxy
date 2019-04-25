@@ -2,104 +2,41 @@
 #include <string.h>
 #include <stdlib.h>
 
-#include "response_parser.h"
-#include "request_parser.h"
+#include "response_parser_dynamic.h"
 
-size_t readFile(char **ptr, char *filename){
-    /* declare a file pointer */
-    FILE    *infile;
-    char    *buffer;
-    long    numbytes;
+int main(void) {
+    char *raw_request = "HTTP/1.1 200 OK\r\n"
+            "Host: localhost:8080\r\n"
+            "Connection: keep-alive\r\n"
+            "Upgrade-Insecure-Requests: 1\r\n"
+            "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n"
+            "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_3) AppleWebKit/604.5.6 (KHTML, like Gecko) Version/11.0.3 Safari/604.5.6\r\n"
+            "Accept-Language: en-us\r\n"
+            "DNT: 1\r\n"
+            "Accept-Encoding: gzip, deflate\r\n"
+            "\r\n"
+            "Usually GET requests don\'t have a body\r\n"
+            "But I don\'t care in this case :)";
+            fprintf(stderr, "Parsing...\n", );
+    Response req = responseNew(raw_request, strlen(raw_request));
+    fprintf(stderr, "Parsing complete\n");
+    char *str;
+    responseToString(req, &str);
+    fprintf(stderr, "TO STRING\n%s\n", str);
 
-    /* open an existing file for reading */
-    infile = fopen(filename, "r");
 
-    /* quit if the file does not exist */
-    if(infile == NULL)
-        return 1;
-
-    /* Get the number of bytes */
-    fseek(infile, 0L, SEEK_END);
-    numbytes = ftell(infile);
-
-    /* reset the file position indicator to
-    the beginning of the file */
-    fseek(infile, 0L, SEEK_SET);
-
-    /* grab sufficient memory for the
-    buffer to hold the text */
-    buffer = (char*)calloc(numbytes, sizeof(char));
-
-    /* memory error */
-    if(buffer == NULL)
-        return 1;
-
-    /* copy all the text into the buffer */
-    fread(buffer, sizeof(char), numbytes, infile);
-    fclose(infile);
-    *ptr = buffer;
-    return numbytes;
-}
-
-int main(){
-    FILE * fp;
-    char * line = NULL;
-    size_t read;
-
-    fp = fopen("request_log.txt", "r");
-    if (fp == NULL)
-        exit(EXIT_FAILURE);
-
-    // size_t len = 0;
-    // while ((read = getdelim(&line, &len, '~', fp)) != -1) {
-    //     line[read - 17] = '\0';
-    //     read -= 16;
-    //     printf("%s %d\n", line, read);
-
-        // request testing code
-        // Request req = requestNew(line, read);
-        // if(req == NULL){
-        //     continue;
-        // }
-        // char *uri;
-        // requestUri(req, &uri);
-        // char *meth;
-        // switch(requestMethod(req)){
-        //     case GET:
-        //         meth = "GET";
-        //         break;
-        //     case CONNECT:
-        //         meth = "CONNECT";
-        //         break;
-        //     case OTHER:
-        //         meth = "OTHER";
-        //         break;
-        // }
-        // printf("Uri: %s | Method: %s\n", uri, meth);
+    // if (req) {
+    //     printf("Method: %d\n", req->method);
+    //     printf("Request-URI: %s\n", req->url);
+    //     printf("HTTP-Version: %s\n", req->version);
+    //     puts("Headers:");
+    //     struct Header *h;
+    //     for (h=req->headers; h; h=h->next) {
+    //         printf("%32s: %s\n", h->name, h->value);
+    //     }
+    //     puts("message-body:");
+    //     puts(req->body);
     // }
-    //
-    // fclose(fp);
-
-
-    read = readFile(&line, "response_log.txt");
-    fprintf(stderr, "File read, %lu bytes\n", read);
-    fprintf(stderr, "%s\n", line);
-
-    Response rsp = responseNew(line, read);
-    if(rsp != NULL){
-        printf("Status: %d | Age: %d\n", responseStatus(rsp), responseGetAge(rsp));
-        responseSetAge(rsp, 5);
-        printf("Status: %d | Age: %d\n", responseStatus(rsp), responseGetAge(rsp));
-        char *out;
-        size_t outLen = responseToCharAry(rsp, &out);
-        printf("Response (reported size %lu, strlen %lu):\n%s\n", outLen, strlen(out), out);
-        printf("Response field max age : %d\n", responseHeaderValue(rsp, RSP_MAX_AGE));
-
-        responseFree(rsp);
-    }else{
-        fprintf(stderr, "Error: response not created");
-    }
-    if (line)
-        free(line);
-    return EXIT_SUCCESS;
+    responseFree(req);
+    return 0;
 }

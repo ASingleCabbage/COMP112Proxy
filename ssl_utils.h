@@ -1,14 +1,13 @@
 #ifndef SSL_UTILS
-#define SSL_UTILS value
+#define SSL_UTILS
 
 #include <sys/socket.h>
 #include <openssl/ssl.h>
-#include "request_parser.h"
-#include "response_parser.h"
+#include "request_parser_dynamic.h"
+#include "response_parser_dynamic.h"
 
 //move this to general purpose network_utils.h?
 typedef enum{ HTTP_TYPE, SSL_TYPE } connectType;
-typedef enum{ IO_COMPLETE, IO_READY, IO_WAIT, IO_CLOSE, IO_ERROR} sslIOState;
 
 typedef enum{ STANDBY, CLIENT_READ, CLIENT_WRITE, SERVER_READ, SERVER_WRITE, REQUEST_COMPLETE, CLIENT_CONNECT } connectState;
 typedef enum{ UNKNOWN = INT_MIN } partialRemain;    //todo since we only have one entry might want to swap it to a #define
@@ -72,8 +71,6 @@ SSL_CTX *initCTX();
 void loadCerts(SSL_CTX *ctx, char *certFile, char *keyFile);
 
 int readSSLMessage(SSL *ssl, char **msgp);
-
-sslIOState handleSSLIO(SSL *ssl, int ret, struct timeval *timeout);
 
 
 #endif /* SSL_UTILS */

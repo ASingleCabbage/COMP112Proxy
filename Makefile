@@ -10,17 +10,18 @@ IFLAGS  = -I/comp/40/include -I/usr/sup/cii40/include/cii
 LDFLAGS = -g -L/comp/40/lib64 -L/usr/sup/cii40/lib64 -lum-dis -lcii -flto -O2
 LDLIBS  = -lcii40-O2 -lm -lssl -lcrypto
 
-EXECS = test proxy_simple proxy_multiple
+# EXECS = test proxy_simple proxy_multiple
+EXECS = proxy_multiple
 
 all: $(EXECS)
 
-test: test.o request_parser.o response_parser.o
-	$(CC) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+# test: test.o request_parser.o response_parser.o
+# 	$(CC) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+#
+# proxy_simple: proxy_simple.o request_parser.o response_parser.o
+# 	$(CC) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
-proxy_simple: proxy_simple.o request_parser.o response_parser.o
-	$(CC) $(LDFLAGS) $^ -o $@ $(LDLIBS)
-
-proxy_multiple: proxy_multiple.o request_parser.o response_parser.o double_table.o ssl_utils.o write_buffer.o pcg_basic.o
+proxy_multiple: proxy_multiple.o http_header.o request_parser_dynamic.o response_parser_dynamic.o double_table.o ssl_utils.o write_buffer.o pcg_basic.o
 	$(CC) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
 # To get *any* .o file, compile its .c file with the following rule.
