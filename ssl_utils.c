@@ -175,6 +175,12 @@ void attachPartial(GenericState gs, char *msg, int len){
     }
 }
 
+void clearPartial(GenericState gs){
+    gs->partialLen = 0;
+    free(gs->partial);
+    gs->partial = NULL;
+}
+
 void sslErrorExit(){
     ERR_print_errors_fp(stderr);
     exit(EXIT_FAILURE);

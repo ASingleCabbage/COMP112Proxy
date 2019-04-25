@@ -1,26 +1,32 @@
 /*
     Multiple client proxy
 
+    Current focus:
+        Check if subsequent request on same connection is handled properly/needs to be handled
+            both SSL and Plain
+        New module focusing on Content Inspection functions
+
     Pending features:
         Partial handling
             request is assumed to be readable all at once -> no exceptions yet
-            multiple requests can be made on the same connection, but subsequent requests
+                multiple requests can be made on the same connection, but subsequent requests
                 should only follow server response
-            Currently content are only cached when connection is closed, rely Content-Length field?
-            Partial catching, make it opt-in only
+            Currently content is only cached when connection is closed/new request is made
+            Partial catching is done for all --> enable based on resource size?
 
-        Caching
+        Text replacement
+        Cacheing
         Domain blacklisting
         Content decoding
-        Text replacement
+        Debugging mode
 
     General improvements
-        request and response parser may have to be changed so that its more flexible
-        parsing all fields instead of cache control related only
-        debugging mode
+        [COMPLETED] request and response parser overhaul for flexibility
+                        --> parsing all fields instead of
+                            cache control related only
 
     Preformance improvemnets
-        look into multithreading
+        look into multithreading?
 
     Notes:
         Chunked encoding, cacheable? is it going to be a problem for caching?
@@ -228,7 +234,7 @@ int main(int argc, char **argv){
                             */
                             if(ss->partial != NULL){
                                 Response response = responseNew(ss->partial, ss->partialLen);
-
+.
                                 requestFree(ss->request);
                                 responseFree(ss->response);
                             }
@@ -365,7 +371,9 @@ int handleSSLRead(int sourceSock, SSLState state, WriteBuffer wb, fd_set *wsp){
     SSL *dest;
     if(SSL_get_fd(state->clientSSL) == sourceSock){
         if(state->state == SERVER_READ){
+            fprintf(stderr, "Subsequent request case...SSL\n");
             /* Subsequent requests on same connection; clearing out old request for new one */
+            clearPartial(state);
             requestFree(state->request);
             state->request = NULL;
         }
@@ -469,18 +477,17 @@ int handleRead(int sourceSock, GenericState *statep, SSL_CTX *ctx, WriteBuffer w
         int destSock;
         if(ps->clientSock == sourceSock){
             if(ps->state == SERVER_READ){
-                //idk this almost never happens unless streaming videos or sth
-                //logging such activity
-                fprintf(stderr, "CLIENT SUBSEQUENT READS\n");
-                writeLog("Subsequent read case...\n", "a");
-                writeLog(incoming, "a");
-                writeLog("\n", "a");
-                writeLog("Subsequent original request is...\n", "a");
-                char *ogMsg;
-                requestToString(state->request, &ogMsg);
-                writeLog(ogMsg, "a");
-                writeLog("\n", "a");
+                /* New requests after previous request has been serviced */
+                /* Cache previous response, clean up state and partial, and check if new
+                   request can be serivced from cache.
+                 */
+                fprintf(stderr, "Subsequent request case...nonSSL\n");
+                requestFree(ps->request);
+                ps->request = NULL;
+                clearPartial(ps);
+
             }else{
+                /* When more requests are coming in before previous request hasn't been serviced */
                 fprintf(stderr, "CLIENT MULTIPLE READS\n");
                 writeLog("Multiple read case...\n", "a");
                 writeLog(incoming, "a");
@@ -490,8 +497,8 @@ int handleRead(int sourceSock, GenericState *statep, SSL_CTX *ctx, WriteBuffer w
                 requestToString(state->request, &ogMsg);
                 writeLog(ogMsg, "a");
                 writeLog("\n", "a");
+                exit(EXIT_FAILURE);
             }
-            exit(EXIT_FAILURE);
             ps->state = CLIENT_READ;
             destSock = ps->serverSock;
         }else{
