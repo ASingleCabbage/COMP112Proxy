@@ -234,7 +234,6 @@ int main(int argc, char **argv){
                             */
                             if(ss->partial != NULL){
                                 Response response = responseNew(ss->partial, ss->partialLen);
-.
                                 requestFree(ss->request);
                                 responseFree(ss->response);
                             }

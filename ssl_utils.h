@@ -56,6 +56,8 @@ typedef struct {
 
 void attachPartial(GenericState gs, char *msg, int len);
 
+void clearPartial(GenericState gs);
+
 void generateCerts(SSL **sslp, SSL *source);
 
 void ShowCerts(SSL* ssl);
