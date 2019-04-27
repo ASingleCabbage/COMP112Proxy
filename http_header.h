@@ -1,7 +1,7 @@
 #ifndef HTTP_HEADER
 #define HTTP_HEADER
 
-typedef enum {GET, CONNECT, OTHER} httpMethod;
+typedef enum {GET, CONNECT, POST, OTHER} httpMethod;
 
 typedef struct Header{
     char *name;

@@ -1,18 +1,20 @@
 /*
     Multiple client proxy
 
+    Sequential benchmark: 9064ms
+
     Current focus:
-        Check if subsequent request on same connection is handled properly/needs to be handled
-            both SSL and Plain
+        Store and forward mode and determining which response types to use that
+        Modify transfer encoding (chunked --> plain) headers in the tostring function
         New module focusing on Content Inspection functions
 
     Pending features:
+        Connect timeouts (youtube) heavily affects performance. Multithreading the solution?
+
         Partial handling
             request is assumed to be readable all at once -> no exceptions yet
-                multiple requests can be made on the same connection, but subsequent requests
-                should only follow server response
-            Currently content is only cached when connection is closed/new request is made
-            Partial catching is done for all --> enable based on resource size?
+            Partial is catched through the Response object
+            Partial catching is done for all --> enable based on resource type?
 
         Text replacement
         Cacheing
@@ -24,16 +26,13 @@
         [COMPLETED] request and response parser overhaul for flexibility
                         --> parsing all fields instead of
                             cache control related only
+        [IN PROGRESS] partial handling implementation complete
 
     Preformance improvemnets
         look into multithreading?
 
     Notes:
-        Chunked encoding, cacheable? is it going to be a problem for caching?
-        only seen it for youtube video streaming
-
         SSL Certificates, needs some sort of caching as well...
-
         Memory allocations and frees are all over the freakin place
 */
 
@@ -64,16 +63,8 @@
 #define TIMEOUT_SEC 60
 #define DT_HINT 60
 
-// todo maybe define a custom error enum for all the int returns
 // todo consider making a network_util module to reduce clutter
-// todo operations are currently done in sets of read/writes, so still blocking a bit
-/* implement some sort of write queue:
-        once connection to server is established, add server socket to read_fd_set and write_fd_set
-        add outgoing message into table (queue is blocking), along with destination info
-        check if i ISSET of write_fd_set in select, and transmit its message
-*/
 
-// some function to differentiate between request or response header
 int initTcpSock(int port);
 int connectServer(Request req);
 int readMessage(int socket, char **msgp);
@@ -137,9 +128,11 @@ int main(int argc, char **argv){
     }
     int port = (int)strtol(argv[1], NULL, 10);
     int mSock = initTcpSock(port);
-    printf("Server running on address %d port %d\n", INADDR_ANY, port);
 
-    writeLog("____________________", "r");
+    pthread_mutex_t lock;
+    if(pthread_mutex_init(&lock, NULL) != 0){
+        errExit("Error when initalizing mutex");
+    }
 
     fd_set active_fd_set, read_fd_set, write_fd_set;
 
@@ -154,6 +147,7 @@ int main(int argc, char **argv){
     struct timeval timeout = timeSetting;
 
     SSL_CTX *ctx = initCTX();
+    initSSLUtils();
 
     DTable dt = DTable_new(DT_HINT);
     WriteBuffer wb = WBuf_new(DT_HINT);
@@ -163,9 +157,9 @@ int main(int argc, char **argv){
 
     SSLState sslState;
 
-    fprintf(stderr, "READY...\n");
+    printf("Server running on address %d port %d\n", INADDR_ANY, port);
     while(true){
-       fprintf(stderr, "Main loop\n");
+       // fprintf(stderr, "Main loop\n");
 
         read_fd_set = active_fd_set;
 
@@ -222,7 +216,7 @@ int main(int argc, char **argv){
                             }
                             close(serverSock);
                             close(clientSock);
-                            fprintf(stderr, "Clearing SSL %d %d from set\n", serverSock, clientSock);
+                            // fprintf(stderr, "Clearing SSL %d %d from set\n", serverSock, clientSock);
                             FD_CLR(serverSock, &active_fd_set);
                             FD_CLR(clientSock, &active_fd_set);
                             FD_CLR(serverSock, &write_fd_set);
@@ -232,11 +226,9 @@ int main(int argc, char **argv){
                             /*
                                 if cacheable, insert cache here; SSL case
                             */
-                            if(ss->partial != NULL){
-                                Response response = responseNew(ss->partial, ss->partialLen);
-                                requestFree(ss->request);
-                                responseFree(ss->response);
-                            }
+                            // clearPartial(ss);
+                            requestFree(ss->request);
+                            responseFree(ss->response);
                             free(ss);
                         }
                     }else{
@@ -269,15 +261,13 @@ int main(int argc, char **argv){
                                 if cacheable, insert cache here
                                 and dont free response (request isn't used as key so should be freed?)
                             */
-                            if(ps->partial != NULL){
-                                Response response = responseNew(ps->partial, ps->partialLen);
-
-                                requestFree(state->request);
-                                responseFree(state->response);
-                            }
+                            // clearPartial(ps);
+                            requestFree(ps->request);
+                            responseFree(ps->response);
+                            // free(DTable_remove(dt, serverSock, clientSock));
+                            free(ps);
                             // }
-                            fprintf(stderr, "Clearing non SSL %d %d from set\n", serverSock, clientSock);
-                            free(DTable_remove(dt, serverSock, clientSock));
+                            // fprintf(stderr, "Clearing non SSL %d %d from set\n", serverSock, clientSock);
                             assert(DTable_get(dt, clientSock) == NULL);
                             assert(DTable_get(dt, serverSock) == NULL);
                             close(clientSock);
@@ -291,16 +281,15 @@ int main(int argc, char **argv){
                         }else if(state != NULL && state->type == SSL_TYPE){
                             /* Non null states indicate a new connection */
                             /* CONNECT request: setting up records for SSL connection */
-                            fprintf(stderr, "SSL server connected %d\n", destSock);
+                            fprintf(stderr, "SSL server connected %i ---> %d\n", i, destSock);
                             FD_SET(destSock, &active_fd_set);
                             DTable_put(dt, i, destSock, state);
-
                             FD_SET(destSock, &write_fd_set);
                             queueOkConnect(i, wb);
                         }else if(state != NULL && state->type == HTTP_TYPE){
                             /* plain HTTP, with write queued */
                             DTable_put(dt, i, destSock, state);
-                            fprintf(stderr, "plain server connected %d\n", destSock);
+                            fprintf(stderr, "PLAIN server connected %i ---> %d\n", i, destSock);
                             FD_SET(destSock, &active_fd_set);
                             FD_SET(destSock, &write_fd_set);
                         }else{
@@ -366,15 +355,23 @@ int handleSSLRead(int sourceSock, SSLState state, WriteBuffer wb, fd_set *wsp){
         state->request = NULL;
         return SSL_ERROR_NONE;
     }
+
+    // fprintf(stderr, "Message from %d\n", sourceSock);
     SSL *source;
     SSL *dest;
     if(SSL_get_fd(state->clientSSL) == sourceSock){
         if(state->state == SERVER_READ){
-            fprintf(stderr, "Subsequent request case...SSL\n");
+            // fprintf(stderr, "Subsequent request case...SSL socket %d\n", sourceSock);
             /* Subsequent requests on same connection; clearing out old request for new one */
-            clearPartial(state);
-            requestFree(state->request);
-            state->request = NULL;
+            state->state = CLIENT_READ;
+
+            if(responseComplete(state->response, NULL)){
+                responseFree(state->response);
+                state->response = NULL;
+                requestFree(state->request);
+                state->request = NULL;
+            }
+
         }
         state->state = CLIENT_READ;
         source = state->clientSSL;
@@ -386,32 +383,31 @@ int handleSSLRead(int sourceSock, SSLState state, WriteBuffer wb, fd_set *wsp){
     }
     char *msg;
     int bytes = readSSLMessage(source, &msg);
-    // fprintf(stderr, "Received SSL\n%s\n", msg);
     if(bytes <= 0){
         return SSL_get_error(source, bytes);
     }
 
 
     if(state->state == SERVER_READ){
-        attachPartial(state, msg, bytes);
+        if(state->response == NULL){
+            state->response = responseNew(msg, bytes);
+        }else{
+            responseAppendBody(&(state->response), msg, bytes);
+        }
     }else{
-        if(state->request == NULL){
-            state->request = requestNew(msg, bytes);
+        if(state->request != NULL){
+            responseFree(state->response);
+            state->response = NULL;
+            requestFree(state->request);
+            state->request = NULL;
             /*
                 URL available for SSL connections here
                 query cache and add responses to write buffer
             */
-        }else{
-            //debugging, remove when deploying
-            fprintf(stderr, "Multiple client requests...SSL\n");
-            char *ogReq;
-            requestToString(state->request, &ogReq);
-            fprintf(stderr, "Original:\n%s\n", ogReq);
-            fprintf(stderr, "New:\n%s\n", msg);
-            exit(EXIT_FAILURE);
         }
+        state->request = requestNew(msg, bytes);
     }
-
+    // fprintf(stderr, "Add to write buffer\n");
     WBuf_put(wb, SSL_TYPE, SSL_get_fd(dest), msg, bytes);
     FD_SET(SSL_get_fd(dest), wsp);
     return SSL_ERROR_NONE;
@@ -458,6 +454,12 @@ int handleRead(int sourceSock, GenericState *statep, SSL_CTX *ctx, WriteBuffer w
         */
 
         int destSock = connectServer(req); //todo some form of error checking maybe
+        if(destSock < 0){
+            free(incoming);
+            requestFree(req);
+            return -1;
+        }
+
         if(requestMethod(req) == CONNECT){ //todo this assumption (only first message can be CONNECT may cause problems)
             *statep = (GenericState) initSSLState(sourceSock, destSock, ctx);
             free(incoming);
@@ -480,28 +482,27 @@ int handleRead(int sourceSock, GenericState *statep, SSL_CTX *ctx, WriteBuffer w
                 /* Cache previous response, clean up state and partial, and check if new
                    request can be serivced from cache.
                  */
-                fprintf(stderr, "Subsequent request case...nonSSL\n");
                 requestFree(ps->request);
                 ps->request = NULL;
-                clearPartial(ps);
+                if(responseComplete(ps->response, NULL)){
+                    /* INSERT TO CACHE HERE */
+                }
+                responseFree(ps->response);
+                state->response = NULL;
 
             }else{
-                /* When more requests are coming in before previous request hasn't been serviced */
-                fprintf(stderr, "CLIENT MULTIPLE READS\n");
-                writeLog("Multiple read case...\n", "a");
-                writeLog(incoming, "a");
-                writeLog("\n", "a");
-                writeLog("Multiple original request is...\n", "a");
-                char *ogMsg;
-                requestToString(state->request, &ogMsg);
-                writeLog(ogMsg, "a");
-                writeLog("\n", "a");
-                exit(EXIT_FAILURE);
+                fprintf(stderr, "MULTIPLE NON SSL REQUESTS\n");
             }
             ps->state = CLIENT_READ;
             destSock = ps->serverSock;
         }else{
-            attachPartial(state, incoming, n);
+            // attachPartial(state, incoming, n);
+            if(state->response == NULL){
+                state->response = responseNew(incoming, n);
+            }else{
+                /* Assuming headers get transfered in one chunk */
+                responseAppendBody(&(state->response), incoming, n);
+            }
             ps->state = SERVER_READ;
             destSock = ps->clientSock;
         }
@@ -526,9 +527,21 @@ int connectServer(Request req){
 
     /* getting host via DNS */
     char *host = requestHost(req);
-    struct hostent *server = gethostbyname(host);
+    struct hostent *server;
+    if(host == NULL){
+        char uri[BUF_SIZE];
+        int len, port;
+        sscanf(requestUri(req), "%[^:]%n:%d", uri, &len, &port);
+        uri[len] = '\0';
+        server = gethostbyname(uri);
+    }else{
+        server = gethostbyname(host);
+    }
     if(server == NULL){
         fprintf(stderr, "ERROR cannot find host with name [%s]\n", host);
+        char *reqStr;
+        requestToString(req, &reqStr);
+        fprintf(stderr, "MSG:\n%s\n", reqStr);
         return -1;
     }
 
@@ -543,13 +556,15 @@ int connectServer(Request req){
     if(hostPort == -1){
         serveraddr.sin_port = htons(DEFAULT_PORT);
     }else{
+        // fprintf(stderr, "Connection using custom port %d\n", hostPort);
         serveraddr.sin_port = htons(hostPort);
     }
 
     /* connect with server */
     if(connect(outSock, (const struct sockaddr *)&serveraddr,
                sizeof(serveraddr)) < 0){
-        errExit("ERROR connecting");
+        perror("ERROR connecting");
+        return -1;
     }
     return outSock;
 }
@@ -561,7 +576,6 @@ int readMessage(int socket, char ** msgp){
     int msglen = 0;
     int n = read(socket, buffer, BUF_SIZE);
     if(n < 0){
-        fprintf(stderr, "ERROR 1 failed to read from outgoing socket\n");
         return -1;
     }
 
@@ -572,7 +586,6 @@ int readMessage(int socket, char ** msgp){
         bzero(buffest, BUF_SIZE);
         n = read(socket, buffest, BUF_SIZE);
         if(n < 0){
-            fprintf(stderr, "ERROR 2 failed to read from outgoing socket\n");
             return -1;
         }else if(n == 0){
             break;

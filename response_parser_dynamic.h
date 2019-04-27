@@ -14,8 +14,14 @@ Response responseNew(char * message, size_t length);
 
 void responseFree(Response rsp);
 
+bool responseComplete(Response rsp, int *remainLen);
+
 /* reason phrase is read only */
 int responseStatus(Response rsp, char **reasonp);
+
+bool responseComplete(Response rsp, int *remaining);
+
+bool responseAppendBody(Response *rspp, char *msg, int len);
 
 Header responseHeader(Response rsp, char *fieldname);
 

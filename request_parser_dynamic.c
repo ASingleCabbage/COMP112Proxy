@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <assert.h>
 
-#define FIELD_BUFFER_SIZE 512
+#define FIELD_BUFFER_SIZE 2000
 
 struct request{
     httpMethod method;
@@ -15,30 +15,38 @@ struct request{
 };
 
 Request requestNew(char * message, size_t length){
+    // fprintf(stderr, "MESSAGE:\n%s\n", message);
     if(length <= 0){
         return NULL;
     }
 
     char *msg = malloc(length + 1);
     memcpy(msg, message, length);
-    msg[length] = '\0'; //making it a c string so strsep wont overflow
+    msg[length] = '\0'; //making it a c string so strsep wont overfloA
     char *rest = msg;
     char *token;
 
     Request req = calloc(1, sizeof(struct request));
-
-    //initialize request with proper values
-    req->port = -1;
-
     token = strsep(&rest, " ");
     if(strcmp(token, "GET") == 0){
         req->method = GET;
     }else if(strcmp(token, "CONNECT") == 0){
         req->method = CONNECT;
+    }else if(strcmp(token, "POST") == 0){
+        req->method = POST;
     }else{
-        fprintf(stderr, "HTTP method %s is not supported\n", token);
-        return NULL;
+        req->method = OTHER;
+        free(msg);
+
+        msg = malloc(length + 1);
+        memcpy(msg, message, length);
+        msg[length] = '\0';
+        req->body = msg;
+        req->port = length;
+        return req;
     }
+
+    req->port = -1;
 
     token = strsep(&rest, " ");
     req->uri = malloc(strlen(token) + 1);
@@ -54,37 +62,32 @@ Request requestNew(char * message, size_t length){
 
     token = strsep(&rest, "\n");
 
-    char buf1[FIELD_BUFFER_SIZE];
-    char buf2[FIELD_BUFFER_SIZE];
-    int num1;
+    char *fieldname;
     while(token != NULL){
-        if(strlen(token) == 0){
+        // fprintf(stderr, "TOKEN (%d): %d\n",strlen(token), *token);
+        if(strlen(token) == 0 || *token == '\r'){
             break;
         }
-        int numParsed = sscanf(token, "%[^:]%n:%s", buf1, &num1, buf2);
-        buf1[num1] = '\0';
-        strcpy(buf2, token + num1 + 1);
-        if(numParsed < 2){
+        char *tk1 = strsep(&token, ":");
+        if(tk1 == NULL || token == NULL || *tk1 == '\0'){
             break;
         }
-        if(strcmp(buf1, "Host") == 0){
-            char fieldval[FIELD_BUFFER_SIZE];
-            int vallen;
-            sscanf(buf2, "%[^:]%n:%d", fieldval, &vallen, &(req->port));
+        fieldname = malloc(strlen(tk1) + 1);
+        strcpy(fieldname, tk1);
 
-            /* stripping whitespace because excluding it in [^:] doesn't work */
-            sscanf(fieldval, "%s%n", fieldval, &vallen);
-            
-            req->host = malloc(vallen + 1);
-            memcpy(req->host, fieldval, vallen);
-            (req->host)[vallen] = '\0';
+        token += 1;
+        int tokLen = strlen(token);
+        char *fieldval = malloc(tokLen + 1);
+        memcpy(fieldval, token, tokLen);
+        fieldval[tokLen - 1] = '\0';
+
+        if(strcmp(fieldname, "Host") == 0){
+            char *host = strsep(&fieldval, ":");
+            int hostLen = strlen(host);
+            req->host = malloc(hostLen + 1);
+            memcpy(req->host, host, hostLen + 1);
+            // (req->host)[strlen(host)] = '\0';
         }else{
-            char *fieldname = malloc(num1 + 1);
-            memcpy(fieldname, buf1, num1);
-            fieldname[num1] = '\0';
-
-            char *fieldval = malloc(strlen(buf2) + 1);
-            strcpy(fieldval, buf2);
             addHeader(&(req->headers), fieldname, fieldval);
         }
         token = strsep(&rest, "\n");
@@ -102,7 +105,7 @@ Request requestNew(char * message, size_t length){
 }
 
 void requestFree(Request req){
-    fprintf(stderr, "FREEING\n");
+    // fprintf(stderr, "FREEING\n");
     if(req == NULL){
         return;
     }
@@ -138,6 +141,21 @@ void requestAddHeader(Request req, char *fieldname, char *fieldval){
 }
 
 int requestToString(Request req, char **strp){
+    char *meth;
+    switch (req->method) {
+        case GET:
+            meth = "GET";
+            break;
+        case CONNECT:
+            meth = "CONNECT";
+            break;
+        default:
+            fprintf(stderr, "Error: attempting to print out an unsupported HTTP method\n");
+            *strp = malloc(req->port + 1);
+            memcpy(*strp, req->body, req->port + 1);
+            return req->port;
+    }
+
     char *headStr;
     int headLen;
     if(req->headers == NULL){
@@ -166,18 +184,6 @@ int requestToString(Request req, char **strp){
         }
     }
 
-    char *meth;
-    switch (req->method) {
-        case GET:
-            meth = "GET";
-            break;
-        case CONNECT:
-            meth = "CONNECT";
-            break;
-        default:
-            fprintf(stderr, "Error: attempting to print out an unsupported HTTP method\n");
-            return -1;
-    }
 
     int len;
     if(req->body == NULL){

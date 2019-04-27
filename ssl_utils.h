@@ -17,9 +17,9 @@ struct ssl_connection{
     connectState state;
     Request request;
     Response response;
-    char *partial;
-    int partialLen;
-    int remainLen;          //not utilized
+    // char *partial;
+    // int partialLen;
+    // int remainLen;          //not utilized
     time_t lastTransmit;    //used to close timed out connections; not utilized
     SSL *clientSSL;
     SSL *serverSSL;
@@ -53,6 +53,8 @@ typedef struct {
     int remainLen;          //not uiilized
     time_t lastTransmit;    //not utilized
 } *GenericState;
+
+void initSSLUtils();
 
 void attachPartial(GenericState gs, char *msg, int len);
 

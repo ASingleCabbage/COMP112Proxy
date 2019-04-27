@@ -16,9 +16,16 @@
 #include <openssl/pem.h>
 
 #include<assert.h>
+#include<table.h>
 #include "pcg_basic.h"
 
 #define BUF_SIZE 1500
+#define TABLE_HINT 300
+
+void initSSLUtils(){
+    srand(time(NULL));
+    pcg32_srandom(rand(), rand());
+}
 
 SSLState initSSLState(int clientSock, int serverSock, SSL_CTX *ctx){
     SSLState state = calloc(1, sizeof(struct ssl_connection));
@@ -26,9 +33,9 @@ SSLState initSSLState(int clientSock, int serverSock, SSL_CTX *ctx){
     state->serverSSL = SSL_new(ctx);
     state->request = NULL;
     state->response = NULL;
-    state->partial = NULL;
-    state->partialLen = -1;
-    state->remainLen = -1;
+    // state->partial = NULL;
+    // state->partialLen = -1;
+    // state->remainLen = -1;
     SSL_set_fd(state->clientSSL, clientSock);
     SSL_set_fd(state->serverSSL, serverSock);
     SSL_connect(state->serverSSL);
@@ -52,16 +59,13 @@ void copy_ext(X509 *cert, X509 *sourceCert, int nid){
 }
 
 void generateCerts(SSL **sslp, SSL *source){
-    assert(source != NULL && *sslp != NULL);
-    // SSL_set_options(*sslp, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
+    assert(source != NULL);
+    assert(*sslp != NULL);
 
     X509 *sourceX509 = SSL_get_peer_certificate(source); //do we need to repackage the thing?
     if(sourceX509 == NULL){
         return;
     }
-
-    // fprintf(stderr, "SOURCE ");
-    // showFields(sourceX509);
 
     FILE *pkeyFile = fopen("server.key", "r");
     RSA *rootRsa = PEM_read_RSAPrivateKey(pkeyFile , NULL, 0, NULL);
@@ -74,24 +78,8 @@ void generateCerts(SSL **sslp, SSL *source){
     EVP_PKEY_assign_RSA(rkey, rootRsa);
 
     X509 *cert = X509_new();
-
-    int serial = pcg32_random();
-    // fprintf(stderr, "SERIAL using %d\n", serial);
+    uint64_t serial = pcg32_random();
     ASN1_INTEGER_set(X509_get_serialNumber(cert), serial);
-
-    // ASN1_INTEGER *serial = X509_get_serialNumber(sourceX509);
-    // if(serial == NULL){
-    //     fprintf(stderr, "Error getting serial number\n");
-    // }
-    //
-    // X509_set_serialNumber(cert, serial);
-
-
-    //todo serial issues
-    // uint64_t serial;
-    // ASN1_INTEGER_get_uint64(&serial, X509_get_serialNumber(cert));
-    // fprintf(stderr, "SERIAL %lu\n", serial);
-
 
     X509_gmtime_adj(X509_get_notBefore(cert), -30);
     X509_gmtime_adj(X509_get_notAfter(cert), 31536000L);
@@ -110,16 +98,11 @@ void generateCerts(SSL **sslp, SSL *source){
 
     copy_ext(cert, sourceX509, NID_subject_alt_name);
 
-    // fprintf(stderr, "DEST ");
-    // showFields(cert);
-
     X509_sign(cert, rkey, EVP_sha256());
 
     SSL_use_certificate(*sslp, cert);
     SSL_use_PrivateKey(*sslp, pkey);
-    // SSL_use_PrivateKey_file(*sslp, "server.key", SSL_FILETYPE_PEM);
-    if (!SSL_check_private_key(*sslp))
-    {
+    if (!SSL_check_private_key(*sslp)){
         fprintf(stderr, "Generate Certificate error\n");
         exit(EXIT_FAILURE);
     }
@@ -155,31 +138,31 @@ PlainState initPlainState(int clientSock, int serverSock){
     state->serverSock = serverSock;
     state->request = NULL;
     state->response = NULL;
-    state->partial = NULL;
-    state->partialLen = -1;
-    state->remainLen = -1;
+    // state->partial = NULL;
+    // state->partialLen = -1;
+    // state->remainLen = -1;
     state->type = HTTP_TYPE;
     state->state = CLIENT_CONNECT;
     return state;
 }
 
-void attachPartial(GenericState gs, char *msg, int len){
-    if(gs->partial == NULL){
-        gs->partial = msg;
-        gs->partialLen = len;
-    }else{
-        gs->partial = realloc(gs->partial, gs->partialLen + len + 1);
-        memcpy(gs->partial + gs->partialLen, msg, len);
-        gs->partialLen += len;
-        (gs->partial)[gs->partialLen] = '\0';
-    }
-}
-
-void clearPartial(GenericState gs){
-    gs->partialLen = 0;
-    free(gs->partial);
-    gs->partial = NULL;
-}
+// void attachPartial(GenericState gs, char *msg, int len){
+//     if(gs->partial == NULL){
+//         gs->partial = msg;
+//         gs->partialLen = len;
+//     }else{
+//         gs->partial = realloc(gs->partial, gs->partialLen + len + 1);
+//         memcpy(gs->partial + gs->partialLen, msg, len);
+//         gs->partialLen += len;
+//         (gs->partial)[gs->partialLen] = '\0';
+//     }
+// }
+//
+// void clearPartial(GenericState gs){
+//     gs->partialLen = 0;
+//     free(gs->partial);
+//     gs->partial = NULL;
+// }
 
 void sslErrorExit(){
     ERR_print_errors_fp(stderr);
@@ -216,8 +199,6 @@ SSL_CTX *initCTX(){
         sslErrorExit();
     }
 
-    //seeding RNG
-    pcg32_srandom(rand(), rand());
     return ctx;
 }
 
@@ -242,6 +223,7 @@ int readSSLMessage(SSL *ssl, char ** msgp){
     int n = SSL_read(ssl, buffer, BUF_SIZE);
     if(n < 0){
         fprintf(stderr, "ERROR when reading SSL message\n");
+        ERR_print_errors_fp(stderr);
         return n;
     }
     // fprintf(stderr, "reading %d/%d bytes\n", n, bufsize);
@@ -254,6 +236,7 @@ int readSSLMessage(SSL *ssl, char ** msgp){
 
         if(n < 0){
             fprintf(stderr, "ERROR when reading SSL message - subsequent reads\n");
+            ERR_print_errors_fp(stderr);
             return n;
         }
 
