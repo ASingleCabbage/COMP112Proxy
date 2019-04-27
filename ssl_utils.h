@@ -9,7 +9,7 @@
 //move this to general purpose network_utils.h?
 typedef enum{ HTTP_TYPE, SSL_TYPE } connectType;
 
-typedef enum{ STANDBY, CLIENT_READ, CLIENT_WRITE, SERVER_READ, SERVER_WRITE, REQUEST_COMPLETE, CLIENT_CONNECT } connectState;
+typedef enum{ STANDBY, CLIENT_READ, SERVER_READ, REQUEST_COMPLETE, CLIENT_CONNECT, SERVER_CONNECT } connectState;
 typedef enum{ UNKNOWN = INT_MIN } partialRemain;    //todo since we only have one entry might want to swap it to a #define
 
 struct ssl_connection{
@@ -17,9 +17,6 @@ struct ssl_connection{
     connectState state;
     Request request;
     Response response;
-    // char *partial;
-    // int partialLen;
-    // int remainLen;          //not utilized
     time_t lastTransmit;    //used to close timed out connections; not utilized
     SSL *clientSSL;
     SSL *serverSSL;
@@ -33,9 +30,6 @@ struct plain_connection{
     connectState state;
     Request request;
     Response response;
-    char *partial;
-    int partialLen;
-    int remainLen;          //not uiilized
     time_t lastTransmit;    //not utilized
     int clientSock;
     int serverSock;
@@ -48,9 +42,6 @@ typedef struct {
     connectState state;
     Request request;
     Response response;
-    char *partial;
-    int partialLen;
-    int remainLen;          //not uiilized
     time_t lastTransmit;    //not utilized
 } *GenericState;
 

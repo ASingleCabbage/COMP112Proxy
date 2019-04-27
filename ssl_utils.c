@@ -33,15 +33,11 @@ SSLState initSSLState(int clientSock, int serverSock, SSL_CTX *ctx){
     state->serverSSL = SSL_new(ctx);
     state->request = NULL;
     state->response = NULL;
-    // state->partial = NULL;
-    // state->partialLen = -1;
-    // state->remainLen = -1;
     SSL_set_fd(state->clientSSL, clientSock);
     SSL_set_fd(state->serverSSL, serverSock);
     SSL_connect(state->serverSSL);
     state->type = SSL_TYPE;
     state->state = CLIENT_CONNECT;
-
     return state;
 }
 
@@ -138,9 +134,6 @@ PlainState initPlainState(int clientSock, int serverSock){
     state->serverSock = serverSock;
     state->request = NULL;
     state->response = NULL;
-    // state->partial = NULL;
-    // state->partialLen = -1;
-    // state->remainLen = -1;
     state->type = HTTP_TYPE;
     state->state = CLIENT_CONNECT;
     return state;

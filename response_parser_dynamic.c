@@ -148,7 +148,8 @@ Response responseNew(char * message, size_t length){
                 }
             } while(chunkLen < restLen && chunkLen != 0);
 
-            memcpy(pos, rest, restLen + 1);
+            // strncpy(pos, rest, restLen + 1); //todo this overflows on some links on wikipedia
+            memcpy(pos, rest, restLen + 1); //todo this overflows on some links on wikipedia (links ending with ':'?)
             rsp->bodyLen += restLen;
             rsp->chunkRemain = chunkLen - restLen;
         }

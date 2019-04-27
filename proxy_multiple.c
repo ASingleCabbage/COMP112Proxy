@@ -1,36 +1,28 @@
 /*
     Multiple client proxy
-
     Sequential benchmark: 9064ms
-
     Current focus:
         Store and forward mode and determining which response types to use that
         Modify transfer encoding (chunked --> plain) headers in the tostring function
         New module focusing on Content Inspection functions
-
     Pending features:
         Connect timeouts (youtube) heavily affects performance. Multithreading the solution?
-
         Partial handling
             request is assumed to be readable all at once -> no exceptions yet
             Partial is catched through the Response object
             Partial catching is done for all --> enable based on resource type?
-
         Text replacement
         Cacheing
         Domain blacklisting
         Content decoding
         Debugging mode
-
     General improvements
         [COMPLETED] request and response parser overhaul for flexibility
                         --> parsing all fields instead of
                             cache control related only
         [IN PROGRESS] partial handling implementation complete
-
     Preformance improvemnets
-        look into multithreading?
-
+        look into multithreading? <--- no fuck thatsa
     Notes:
         SSL Certificates, needs some sort of caching as well...
         Memory allocations and frees are all over the freakin place
@@ -50,6 +42,7 @@
 #include <resolv.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <fcntl.h>
 
 #include "request_parser_dynamic.h"
 #include "response_parser_dynamic.h"
@@ -58,7 +51,7 @@
 #include "write_buffer.h"
 
 #define LISTEN_BACKLOG 6
-#define BUF_SIZE 1500
+#define BUF_SIZE 3000
 #define DEFAULT_PORT 80
 #define TIMEOUT_SEC 60
 #define DT_HINT 60
@@ -129,17 +122,12 @@ int main(int argc, char **argv){
     int port = (int)strtol(argv[1], NULL, 10);
     int mSock = initTcpSock(port);
 
-    pthread_mutex_t lock;
-    if(pthread_mutex_init(&lock, NULL) != 0){
-        errExit("Error when initalizing mutex");
-    }
+    fd_set active_read_set, active_write_set, read_fd_set, write_fd_set;
 
-    fd_set active_fd_set, read_fd_set, write_fd_set;
-
-    FD_ZERO(&active_fd_set);
-    FD_ZERO(&write_fd_set);
-    FD_SET(mSock, &active_fd_set);
-    FD_SET(STDIN_FILENO, &active_fd_set);
+    FD_ZERO(&active_read_set);
+    FD_ZERO(&active_write_set);
+    FD_SET(mSock, &active_read_set);
+    FD_SET(STDIN_FILENO, &active_read_set);
 
     struct timeval timeSetting;
     timeSetting.tv_sec  = TIMEOUT_SEC;
@@ -161,7 +149,8 @@ int main(int argc, char **argv){
     while(true){
        // fprintf(stderr, "Main loop\n");
 
-        read_fd_set = active_fd_set;
+        read_fd_set = active_read_set;
+        write_fd_set = active_write_set;
 
         n = select(FD_SETSIZE, &read_fd_set, &write_fd_set, NULL, &timeout);
         if(n < 0){
@@ -188,14 +177,14 @@ int main(int argc, char **argv){
                             continue;
                         }
                         // fprintf(stderr, "New socket %d connected\n", newSock);
-                        FD_SET(newSock, &active_fd_set);
+                        FD_SET(newSock, &active_read_set);
                     }else if(i == STDIN_FILENO){
                         /* handles stdin for debugging and stuff */
                         handleStdin();
                     }else if((sslState = DTable_get(dt, i)) != NULL && sslState->type == SSL_TYPE){
                         /* all active SSL connections go here */
                         int err;
-                        if((err = handleSSLRead(i, sslState, wb, &write_fd_set)) != SSL_ERROR_NONE){
+                        if((err = handleSSLRead(i, sslState, wb, &active_write_set)) != SSL_ERROR_NONE){
                             int serverSock = SSL_get_fd(sslState->serverSSL);
                             int clientSock = SSL_get_fd(sslState->clientSSL);
                             switch (err) {
@@ -217,16 +206,15 @@ int main(int argc, char **argv){
                             close(serverSock);
                             close(clientSock);
                             // fprintf(stderr, "Clearing SSL %d %d from set\n", serverSock, clientSock);
-                            FD_CLR(serverSock, &active_fd_set);
-                            FD_CLR(clientSock, &active_fd_set);
-                            FD_CLR(serverSock, &write_fd_set);
-                            FD_CLR(clientSock, &write_fd_set);
+                            FD_CLR(serverSock, &active_read_set);
+                            FD_CLR(clientSock, &active_read_set);
+                            FD_CLR(serverSock, &active_write_set);
+                            FD_CLR(clientSock, &active_write_set);
                             SSLState ss = DTable_remove(dt, clientSock, serverSock);
 
                             /*
                                 if cacheable, insert cache here; SSL case
                             */
-                            // clearPartial(ss);
                             requestFree(ss->request);
                             responseFree(ss->response);
                             free(ss);
@@ -240,19 +228,12 @@ int main(int argc, char **argv){
                             GenericState state = DTable_get(dt, i);
                             if(state == NULL){
                                 close(i);
-                                FD_CLR(i, &active_fd_set);
-                                FD_CLR(i, &write_fd_set);
+                                FD_CLR(i, &active_read_set);
+                                FD_CLR(i, &active_write_set);
                                 WBuf_remove(wb, i);
                                 continue;
                             }
                             int clientSock, serverSock;
-                            // if(state->type == SSL_TYPE){
-                            //     SSLState ss = (SSLState) state;
-                            //     clientSock = SSL_get_fd(ss->clientSSL);
-                            //     serverSock = SSL_get_fd(ss->serverSSL);
-                            //     SSL_shutdown(ss->serverSSL);
-                            //     SSL_shutdown(ss->clientSSL);
-                            // }else{
                             PlainState ps = (PlainState) state;
                             clientSock = ps->clientSock;
                             serverSock = ps->serverSock;
@@ -261,48 +242,80 @@ int main(int argc, char **argv){
                                 if cacheable, insert cache here
                                 and dont free response (request isn't used as key so should be freed?)
                             */
-                            // clearPartial(ps);
                             requestFree(ps->request);
                             responseFree(ps->response);
-                            // free(DTable_remove(dt, serverSock, clientSock));
                             free(ps);
-                            // }
                             // fprintf(stderr, "Clearing non SSL %d %d from set\n", serverSock, clientSock);
                             assert(DTable_get(dt, clientSock) == NULL);
                             assert(DTable_get(dt, serverSock) == NULL);
                             close(clientSock);
                             close(serverSock);
-                            FD_CLR(clientSock, &active_fd_set);
-                            FD_CLR(serverSock, &active_fd_set);
-                            FD_CLR(clientSock, &write_fd_set);
-                            FD_CLR(serverSock, &write_fd_set);
+                            FD_CLR(clientSock, &active_read_set);
+                            FD_CLR(serverSock, &active_read_set);
+                            FD_CLR(clientSock, &active_write_set);
+                            FD_CLR(serverSock, &active_write_set);
                             WBuf_remove(wb, clientSock);
                             WBuf_remove(wb, serverSock);
-                        }else if(state != NULL && state->type == SSL_TYPE){
+                        }else if(state != NULL){
                             /* Non null states indicate a new connection */
-                            /* CONNECT request: setting up records for SSL connection */
-                            fprintf(stderr, "SSL server connected %i ---> %d\n", i, destSock);
-                            FD_SET(destSock, &active_fd_set);
+                            /* Only setting up destination socket to write set, as connection still ongoing */
+                            FD_SET(destSock, &active_write_set);
+                            FD_CLR(i, &active_read_set);
                             DTable_put(dt, i, destSock, state);
-                            FD_SET(destSock, &write_fd_set);
-                            queueOkConnect(i, wb);
-                        }else if(state != NULL && state->type == HTTP_TYPE){
-                            /* plain HTTP, with write queued */
-                            DTable_put(dt, i, destSock, state);
-                            fprintf(stderr, "PLAIN server connected %i ---> %d\n", i, destSock);
-                            FD_SET(destSock, &active_fd_set);
-                            FD_SET(destSock, &write_fd_set);
                         }else{
                             /* existing connections */
-                            FD_SET(destSock, &write_fd_set);
+                            FD_SET(destSock, &active_write_set);
                         }
                     }
-                }
-                if((we = WBuf_get(wb, i, &remaining)) != NULL){
-                    if(remaining == 0){
-                        FD_CLR(i, &write_fd_set);
+                }else if(FD_ISSET(i, &write_fd_set)){
+                    PlainState state;
+                    if((we = WBuf_get(wb, i, &remaining)) != NULL){
+                        if(remaining == 0){
+                            FD_CLR(i, &active_write_set);
+                        }
+                        handleWrite(i, we, dt);
+                    }else if((state = DTable_get(dt, i)) != NULL && state->state == SERVER_CONNECT){
+                        /* checking on ongoing connects */
+                        /* ongoing connections are only in write_fd_set, not in WB, and has plain state for all types */
+                        int err;
+                        size_t errlen = sizeof(int);
+                        getsockopt(i, SOL_SOCKET, SO_ERROR, &err, &errlen);
+                        if(err != 0){
+                            /* connect failed */
+                            fprintf(stderr, "Failed to connect to socket %d\n", i);
+                            close(state->clientSock);
+                            close(state->serverSock);
+                            FD_CLR(i, &active_write_set);
+                            continue;
+                        }
+
+                        const int flags = fcntl(state->serverSock, F_GETFL, 0);
+                        fcntl(state->serverSock, F_SETFL, flags ^ O_NONBLOCK);
+
+                        FD_SET(state->serverSock, &active_read_set);
+                        FD_SET(state->clientSock, &active_read_set);
+                        FD_SET(state->serverSock, &active_write_set);
+                        FD_SET(state->clientSock, &active_write_set);
+                        if (state->type == SSL_TYPE) {
+                            /* CONNECT request: setting up records for SSL connection */
+                            SSLState sslState = initSSLState(state->clientSock, state->serverSock, ctx);
+                            sslState->request = state->request;
+                            fprintf(stderr, "SSL server connected %i ---> %d\n", state->clientSock, state->serverSock);
+                            DTable_remove(dt, state->clientSock, state->serverSock);
+                            DTable_put(dt, state->clientSock, state->serverSock, sslState);
+                            queueOkConnect(state->clientSock, wb);
+                            free(state);
+                        }else{
+                            /* plain HTTP, with write queued */
+                            state->state = CLIENT_READ;
+
+                            char *msg;
+                            int msgLen = requestToString(state->request, &msg);
+                            WBuf_put(wb, HTTP_TYPE, state->serverSock, msg, msgLen);
+                            DTable_put(dt, state->clientSock, state->serverSock, state);
+                            fprintf(stderr, "PLAIN server connected %i ---> %d\n", state->clientSock, state->serverSock);
+                        }
                     }
-                    handleWrite(i, we, dt);
                 }
             }
         }
@@ -446,31 +459,32 @@ int handleRead(int sourceSock, GenericState *statep, SSL_CTX *ctx, WriteBuffer w
             Caching: get url as key from req
             If exists in cache, retrieve and add to write buffer,
             and manually close one sided connection
-
             Should work for SSL connections as well, but an OK response should be
             sent first. Although we do have to re-encrypt and possibly regenerate
             another set of certificates -> dedicated function for SSL after cache retrieval
-
         */
 
-        int destSock = connectServer(req); //todo some form of error checking maybe
+        int destSock = connectServer(req);
         if(destSock < 0){
             free(incoming);
             requestFree(req);
             return -1;
         }
 
-        if(requestMethod(req) == CONNECT){ //todo this assumption (only first message can be CONNECT may cause problems)
-            *statep = (GenericState) initSSLState(sourceSock, destSock, ctx);
-            free(incoming);
-        }else{
-            // fprintf(stderr, "WPUT by %d to %d\n", sourceSock, destSock);
-            WBuf_put(wb, HTTP_TYPE, destSock, incoming, n);
-            *statep = (GenericState) initPlainState(sourceSock, destSock);
+        *statep = (GenericState) initPlainState(sourceSock, destSock);
+        if(requestMethod(req) == CONNECT){
+            (*statep)->type = SSL_TYPE;
         }
-        // POINT OF INTEREST request freed here
+        (*statep)->state = SERVER_CONNECT;
         (*statep)->request = req;
-        // requestFree(req);
+        // if(requestMethod(req) == CONNECT){ //todo this assumption (only first message can be CONNECT may cause problems)
+        //     *statep = (GenericState) initSSLState(sourceSock, destSock, ctx);
+        //     free(incoming);
+        // }else{
+        //     WBuf_put(wb, HTTP_TYPE, destSock, incoming, n);
+        //     *statep = (GenericState) initPlainState(sourceSock, destSock);
+        // }
+        free(incoming);
         return destSock;
     }else if(state->type == HTTP_TYPE){
         // fprintf(stderr, "EXISTING HTTP\n");
@@ -519,8 +533,8 @@ int handleRead(int sourceSock, GenericState *statep, SSL_CTX *ctx, WriteBuffer w
 
 //returns socket if successful, else -1
 int connectServer(Request req){
-    /* creating outbout socket */
-    int outSock = socket(AF_INET, SOCK_STREAM, 0);
+    /* creating outbout socket, socket set to nonblocking before connecting */
+    int outSock = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
     if(outSock < 0){
         errExit("ERROR failed to create outbound socket");
     }
@@ -561,10 +575,15 @@ int connectServer(Request req){
     }
 
     /* connect with server */
-    if(connect(outSock, (const struct sockaddr *)&serveraddr,
-               sizeof(serveraddr)) < 0){
-        perror("ERROR connecting");
-        return -1;
+    if(connect(outSock, (const struct sockaddr *)&serveraddr, sizeof(serveraddr)) < 0){
+        switch (errno) {
+            case EINPROGRESS:
+                fprintf(stderr, "Started connecting to %d...\n", outSock);
+                break;
+            default:
+                perror("ERROR connecting");
+                return -1;
+        }
     }
     return outSock;
 }

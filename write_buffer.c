@@ -2,7 +2,7 @@
 #include <table.h> /* Good ol' Hanson strikes again */
 #include <seq.h>
 
-#define SEQ_HINT 5
+#define SEQ_HINT 20
 
 /* The same hashing and comparison functions as DTable */
 static int cmpInt(const uintptr_t a, const uintptr_t b){
