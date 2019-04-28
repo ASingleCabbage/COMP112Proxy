@@ -46,7 +46,7 @@ void appendHeader(Header *headp, char *name, char *value){
         int len2 = strlen(value);
         int newLen = len1 + len2 + 2;
         header->value = realloc(header->value, newLen);
-        (header->value)[len1] = ';';
+        (header->value)[len1] = ',';
         memcpy(header->value + len1 + 1, value, len2);
         (header->value)[newLen] = '\0';
     }

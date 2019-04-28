@@ -271,6 +271,11 @@ bool responseAppendBody(Response *rspp, char *msg, int len){
     return (*rspp)->complete;
 }
 
+int responseBody(Response rsp, char **bodyp){
+    *bodyp = rsp->body;
+    return rsp->bodyLen;
+}
+
 int responseStatus(Response rsp, char **reasonp){
     if(*reasonp != NULL){
         *reasonp = rsp->reason;

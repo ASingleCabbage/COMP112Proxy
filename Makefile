@@ -15,13 +15,7 @@ EXECS = proxy_multiple
 
 all: $(EXECS)
 
-# test: test.o request_parser.o response_parser.o
-# 	$(CC) $(LDFLAGS) $^ -o $@ $(LDLIBS)
-#
-# proxy_simple: proxy_simple.o request_parser.o response_parser.o
-# 	$(CC) $(LDFLAGS) $^ -o $@ $(LDLIBS)
-
-proxy_multiple: proxy_multiple.o http_header.o request_parser_dynamic.o response_parser_dynamic.o double_table.o ssl_utils.o write_buffer.o pcg_basic.o hash-string.o
+proxy_multiple: proxy_multiple.o http_header.o request_parser_dynamic.o response_parser_dynamic.o double_table.o ssl_utils.o write_buffer.o cache.o pcg_basic.o hash-string.o
 	$(CC) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
 # To get *any* .o file, compile its .c file with the following rule.

@@ -3,6 +3,7 @@
 #include <stdlib.h>
 
 #include "response_parser_dynamic.h"
+#include "inspector.h"
 
 int main(void) {
     char *raw_request = "HTTP/1.1 200 OK\r\n"
@@ -24,6 +25,10 @@ int main(void) {
     responseToString(req, &str);
     fprintf(stderr, "TO STRING\n%s\n", str);
 
+    censorWords();
+
+    fprintf(stderr, "AFTER CENSORSHIP\n%s\n", str);
+
 
     // if (req) {
     //     printf("Method: %d\n", req->method);
@@ -37,6 +42,5 @@ int main(void) {
     //     puts("message-body:");
     //     puts(req->body);
     // }
-    responseFree(req);
     return 0;
 }

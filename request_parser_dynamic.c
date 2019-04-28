@@ -99,7 +99,6 @@ Request requestNew(char * message, size_t length){
         memcpy(req->body, rest, bodyLen);
     }
 
-
     free(msg);
     return req;
 }
