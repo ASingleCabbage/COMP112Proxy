@@ -5,10 +5,10 @@
 
 #include "cache.h"
 #include "hash-string.h"
-#include "response_parser_dynamic.h"
-
+#include "http_header.h"
 
 #define BUF_SIZE 50
+#define URI_LEN 2000
 
 typedef struct cacheEntry{
     Response response;
@@ -18,7 +18,8 @@ typedef struct cacheEntry{
 
 Cache cache_new(int hint)
 {
-    return Table_new(hint, strcmp, string_hash);
+    return Table_new(hint, (int (*)(const void *, const void *))strcmp,
+                           (unsigned int (*)(const void *))string_hash);
 }
 
 void cache_free(Cache csh)
@@ -27,55 +28,100 @@ void cache_free(Cache csh)
     Table_free(&csh);
 }
 
-Response cache_get(Cache csh, char *uri, int *agep)
+Response cache_get(Cache csh, Request req, int *agep)
 {
-    CEntry entry = Table_get(csh, uri);
+    CEntry entry;
+    char *uri = requestUri(req);
+    if(uri == NULL){
+        return NULL;
+    }
+    char fullPath[URI_LEN];
+    if(*uri == '/'){
+        /* absolute path mode, append to host */
+        char *host = requestHost(req);
+        int uriLen = strlen(uri);
+        int hostLen = strlen(host);
+        memcpy(fullPath, host, hostLen);
+        memcpy(fullPath + hostLen, uri, uriLen);
+        fullPath[uriLen + hostLen] = '\0';
+        entry = Table_get(csh, fullPath);
+        uri = fullPath;
+    }else{
+        entry = Table_get(csh, uri);
+    }
+    fprintf(stderr, "Cache query for %s\n", uri);
+
+
     if (entry == NULL){
         return NULL;
-    }else if(entry->expireTime < time(NULL)){
+    }else if(entry->expireTime != 0 && entry->expireTime < time(NULL)){
         free(entry->response);
         free(entry);
         return NULL;
     }
 
     int age = time(NULL) - entry->insertionTime;
-
     if(agep != NULL){
         *agep = age;
     }
 
-    Header ageHeader = reponseHeader(entry->response, "Age");
+    Header ageHeader = responseHeader(entry->response, "Age");
     if(ageHeader == NULL){
         char buf[BUF_SIZE];
         sprintf(buf, "%d", age);
         responseAddHeader(entry->response, "Age", buf);
     }else{
-        free(ageHeader->value);
+        // free(ageHeader->value);      /* invalid free here?? */
         ageHeader->value = calloc(1, BUF_SIZE);
         sprintf(ageHeader->value, "%d", age);
     }
+    fprintf(stderr, "Cache hit for %s\n", uri);
     return entry->response;
 }
 
-bool cache_add(Cache csh, char *uri, Response rsp)
+bool cache_add(Cache csh, Request req, Response rsp)
 {
+    if(req == NULL || rsp == NULL){
+        return false;
+    }
     int expiry = cache_expiry(rsp);
     if(expiry < 0){
         return false;
     }
+    char *uri = requestUri(req);
+    if(uri == NULL){
+        return false;
+    }
 
-    CEntry entry = malloc(sizeof(struct cacheEntry));
+    CEntry entry = calloc(1, sizeof(struct cacheEntry));
     entry->insertionTime = time(NULL);
     entry->expireTime = entry->insertionTime + expiry;
     entry->response = rsp;
 
-    Table_put(csh, uri, entry);
+    if(*uri == '/'){
+        /* absolute path mode, append to host */
+        char *host = requestHost(req);
+        int uriLen = strlen(uri);
+        int hostLen = strlen(host);
+        char *fullPath = malloc(URI_LEN);
+        memcpy(fullPath, host, hostLen);
+        memcpy(fullPath + hostLen, uri, uriLen);
+        fullPath[uriLen + hostLen] = '\0';
+        fprintf(stderr, "Inserting uri: %s, expiry at %d\n", fullPath, expiry);
+        Table_put(csh, fullPath, entry);
+    }else{
+        char *fullPath = malloc(URI_LEN);
+        strcpy(fullPath, uri);
+        fprintf(stderr, "Inserting uri: %s, expiry at %d\n", uri, expiry);
+        Table_put(csh, uri, entry);
+    }
+
     return true;
 }
 
 static void remove_expired(const void *key, void **value, void *cl){
     CEntry ce = *(CEntry *)value;
-    if(ce->expireTime < time(NULL)){
+    if(ce->expireTime != 0 && ce->expireTime < time(NULL)){
         responseFree(ce->response);
         free(ce);
         ce = NULL;
@@ -89,10 +135,11 @@ void cache_pruge_expired(Cache csh){
 /* Normally the Expire header will also be considered for expiry time, but
    ain't no one got time to parse that mess */
 int cache_expiry(Response rsp){
-    char *controlValues = responseHeader(rsp, "Cache-Control");
-    if(controlValues == NULL){
+    Header h = responseHeader(rsp, "Cache-Control");
+    if(h == NULL){
         return 0;
     }
+    char *controlValues = h->value;
 
     char *vals = malloc(strlen(controlValues) + 1);
     memcpy(vals, controlValues, strlen(controlValues) + 1);
@@ -112,7 +159,7 @@ int cache_expiry(Response rsp){
             sscanf(token, "s-maxage=%d", &expiry);
             return expiry;
         }
-        char *token = strsep(&vals, ",");
+        token = strsep(&vals, ",");
     }
     return expiry;
 }

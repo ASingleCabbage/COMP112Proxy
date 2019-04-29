@@ -16,6 +16,8 @@ Header getHeader(Header head, char *fieldname);
 /* Replaces existing if exists */
 void addHeader(Header *headp, char *name, char *value);
 
+void removeHeader(Header *headp, char *name);
+
 /* Appends values if field already exists, else create a new header entry */
 void appendHeader(Header *headp, char *name, char *value);
 

@@ -30,6 +30,34 @@ void addHeader(Header *headp, char *name, char *value){
     }
 }
 
+void removeHeader(Header *headp, char *name){
+    if(*headp == NULL){
+        return;
+    }
+
+    Header curr = *headp;
+    if(strcmp(curr->name, name) == 0){
+        *headp = curr->next;
+        free(curr->name);
+        free(curr->value);
+        free(curr);
+        return;
+    }
+
+    Header prev = curr;
+    curr = curr->next;
+    while(curr != NULL){
+        if(strcmp(curr->name, name) == 0){
+            prev->next = curr->next;
+            free(curr->name);
+            free(curr->value);
+            free(curr);
+            return;
+        }
+    }
+    return;
+}
+
 /* Appends values if field already exists, else create a new header entry */
 void appendHeader(Header *headp, char *name, char *value){
     Header header = getHeader(*headp, name);

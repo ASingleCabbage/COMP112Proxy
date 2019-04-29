@@ -168,6 +168,17 @@ void responseFree(Response rsp){
     free(rsp);
 }
 
+/* change transfer encoding to non-chunked */
+static void finalizeResponse(Response rsp){
+    if(rsp->chunkRemain != -1){
+        removeHeader(&(rsp->headers), "Transfer-Encoding");
+        char lenStr[10];
+        sprintf(lenStr, "%d", rsp->bodyLen);
+        addHeader(&(rsp->headers), "Content-Length", lenStr);
+    }
+    rsp->chunkRemain = -1;
+}
+
 bool responseComplete(Response rsp, int *remaining){
     Header h;
     if((h = getHeader(rsp->headers, "Content-Length")) != NULL){
@@ -177,6 +188,7 @@ bool responseComplete(Response rsp, int *remaining){
         }
         return (rsp->bodyLen >= clen);
     }else if(rsp->chunkRemain == 0){
+        finalizeResponse(rsp);
         return true;
     }
     return (rsp->chunkRemain == -1); /* returns true if not chunked */
@@ -200,6 +212,7 @@ static bool appendPartial(Response *rspp, char *msg, int len){
 }
 
 
+
 bool responseAppendBody(Response *rspp, char *msg, int len){
     if((*rspp)->partialHeader){
         appendPartial(rspp, msg, len);
@@ -212,7 +225,7 @@ bool responseAppendBody(Response *rspp, char *msg, int len){
     }
     if((*rspp)->chunkRemain >= 0){
         if((*rspp)->chunkRemain == 0){
-            unsigned chunkLen = 0;
+            int chunkLen = 0;
             (*rspp)->body = realloc((*rspp)->body, len + (*rspp)->bodyLen);
 
             int hexLen;
@@ -294,6 +307,7 @@ void responseAddHeader(Response rsp, char *fieldname, char *fieldval){
 int responseToString(Response rsp, char **strp){
     char *headStr;
     int headLen;
+
     if(rsp->headers == NULL){
         headLen = 0;
         headStr = malloc(1); /* allocating something so we can free without checking */

@@ -186,7 +186,7 @@ int requestToString(Request req, char **strp){
 
     int len;
     if(req->body == NULL){
-        sprintf(*strp, "%s %s %s\r\n%s%s%n", meth, req->uri, "HTTP/1.1", hostfield, headStr, &len);
+        sprintf(*strp, "%s %s %s\r\n%s%s\r\n%n", meth, req->uri, "HTTP/1.1", hostfield, headStr, &len);
     }else{
         sprintf(*strp, "%s %s %s\r\n%s%s\r\n%s%n", meth, req->uri, "HTTP/1.1", hostfield, headStr, req->body, &len);
     }

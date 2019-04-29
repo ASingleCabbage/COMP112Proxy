@@ -3,6 +3,7 @@
 
 #include "table.h"
 #include "response_parser_dynamic.h"
+#include "request_parser_dynamic.h"
 #include <stdbool.h>
 
 typedef Table_T Cache;
@@ -10,8 +11,8 @@ typedef Table_T Cache;
 Cache cache_new(int hint);
 void cache_free(Cache csh);
 
-Response cache_get(Cache csh, char *uri, int *agep);
-bool cache_add(Cache csh, char *uri, Response rsp);
+Response cache_get(Cache csh, Request req, int *agep);
+bool cache_add(Cache csh, Request req, Response rsp);
 void cache_pruge_expired(Cache csh);
 
 // void cache_list(Cache csh);
