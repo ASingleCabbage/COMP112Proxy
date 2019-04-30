@@ -31,4 +31,6 @@ int responseBody(Response rsp, char **bodyp);
 
 int responseToString(Response rsp, char **strp);
 
+Response responseDuplicate(Response rsp);
+
 #endif /* RESPONSE_PARSER_DYNAMIC */

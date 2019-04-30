@@ -17,7 +17,7 @@ struct ssl_connection{
     connectState state;
     Request request;
     Response response;
-    time_t lastTransmit;    //used to close timed out connections; not utilized
+    bool fromCache;    //used to close timed out connections; not utilized
     SSL *clientSSL;
     SSL *serverSSL;
 };
@@ -30,7 +30,7 @@ struct plain_connection{
     connectState state;
     Request request;
     Response response;
-    time_t lastTransmit;    //not utilized
+    bool fromCache; 
     int clientSock;
     int serverSock;
 };
@@ -42,7 +42,7 @@ typedef struct {
     connectState state;
     Request request;
     Response response;
-    time_t lastTransmit;    //not utilized
+    bool fromCache;
 } *GenericState;
 
 void initSSLUtils();

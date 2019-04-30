@@ -1,6 +1,7 @@
 #include "response_parser_dynamic.h"
 #include <string.h>
 #include <stdio.h>
+#include <ctype.h>
 #include <assert.h>
 
 #define FIELD_BUFFER_SIZE 2000
@@ -11,14 +12,45 @@ struct response{
     char *reason;
     Header headers;
     char *body;
-    bool storeForwrad;
-    bool partialHeader;
+    bool storeForward;
+    bool partialHead;
     int bodyLen;
     int chunkRemain;
     bool complete;
     int status;
 };
 
+Response responseDuplicate(Response source){
+    Response rsp = malloc(sizeof(struct response));
+    rsp->reason = strdup(source->reason);
+    rsp->headers = dupHeadList(source->headers);
+    rsp->storeForward = source->storeForward;
+    rsp->partialHead = source->partialHead;
+    rsp->bodyLen = source->bodyLen;
+    rsp->chunkRemain = source->chunkRemain;
+    rsp->complete = source->complete;
+    rsp->status = source->status;
+    rsp->body = malloc(rsp->bodyLen + 1);
+    memcpy(rsp->body, source->body, rsp->bodyLen + 1);
+    return rsp;
+}
+
+static void stripRearSpace(char *str, int len){
+    int index;
+    if(len < 0){
+        index = strlen(str) - 1;
+    }else{
+        index = len - 1;
+    }
+    while(index >= 0){
+        if(isspace(str[index])){
+            str[index] = '\0';
+        }else{
+            return;
+        }
+        index--;
+    }
+}
 static bool partialHeader(char *msg, size_t length){
     char *front = malloc(length + 1);
     memcpy(front, msg, length);
@@ -28,7 +60,7 @@ static bool partialHeader(char *msg, size_t length){
 
     token = strsep(&rest, "\n");
     while (rest != NULL) {
-        if(*token == '\0'){
+        if(*token == '\r'){
             /* empty token means that break between header and body is encountered */
             free(front);
             return false;
@@ -37,7 +69,6 @@ static bool partialHeader(char *msg, size_t length){
     }
     return true;
 }
-
 
 Response responseNew(char * message, size_t length){
     if(length <= 0){
@@ -49,7 +80,7 @@ Response responseNew(char * message, size_t length){
     msg[length] = '\0'; //making it a c string so strsep wont overflow
     Response rsp = calloc(1, sizeof(struct response));
     if(partialHeader(message, length)){
-        rsp->partialHeader = true;
+        rsp->partialHead = true;
         rsp->body = msg;
         rsp->bodyLen = length;
         return rsp;
@@ -80,14 +111,10 @@ Response responseNew(char * message, size_t length){
             fprintf(stderr, "Error when parsing headers, continuing...\n");
             break;
         }
-        char *fieldname = malloc(strlen(tk1) + 1);
-        strcpy(fieldname, tk1);
-
-        token += 1;
-        int tokLen = strlen(token);
-        char *fieldval = malloc(tokLen + 1);
-        memcpy(fieldval, token, tokLen + 1);
-        addHeader(&(rsp->headers), fieldname, fieldval);
+        token += 1; /* move past the : (I think anyway) */
+        stripRearSpace(tk1, -1);
+        stripRearSpace(token, -1);
+        addHeader(&(rsp->headers), tk1, token);
 
         token = strsep(&rest, "\n");
     }
@@ -100,8 +127,9 @@ Response responseNew(char * message, size_t length){
 
     Header h;
     if((h = getHeader(rsp->headers, "Content-Type")) != NULL && headerHasValue(h, "text/html", ";")){
-        rsp->storeForwrad = true;
+        rsp->storeForward = true;
     }
+
     if((h = getHeader(rsp->headers, "Content-Length")) != NULL){
         rsp->chunkRemain = -1;
         rsp->body = calloc(1, atoi(h->value) + 1);
@@ -112,10 +140,8 @@ Response responseNew(char * message, size_t length){
             rsp->bodyLen += restLen;
         }
         free(msg);
-        return rsp;
-    }else{
-        /* if no content length is specified, assume uses chunked mode */
-        /* the strcmp may break if some other transfer encoding is combined with chunked */
+    }else if((h = getHeader(rsp->headers, "Transfer-Encoding")) != NULL){
+        /* May or may not have to check for chunked mode */
         token = strsep(&rest, "\n");
         int chunkLen = strtol(token, NULL, 16);
         int restLen = 0;
@@ -158,8 +184,14 @@ Response responseNew(char * message, size_t length){
             rsp->chunkRemain = chunkLen - restLen;
         }
         free(msg);
-        return rsp;
+    }else{
+        /* responses with no body */
+        rsp->bodyLen = 0;
+        rsp->chunkRemain = -1;
+        rsp->body = strdup("");
+
     }
+    return rsp;
 }
 
 void responseFree(Response rsp){
@@ -174,8 +206,12 @@ void responseFree(Response rsp){
 
 /* change transfer encoding to non-chunked */
 static void finalizeResponse(Response rsp){
+    char *msgStr;
+    responseToString(rsp, &msgStr);
+
     if(rsp->chunkRemain != -1){
-        removeHeader(&(rsp->headers), "Transfer-Encoding");
+        fprintf(stderr, "CHUNK %d, body len %d\n", rsp->chunkRemain, rsp->bodyLen);
+
         char lenStr[10];
         sprintf(lenStr, "%d", rsp->bodyLen);
         addHeader(&(rsp->headers), "Content-Length", lenStr);
@@ -185,13 +221,22 @@ static void finalizeResponse(Response rsp){
 
 /* Finalizes (replace transfer encoding if originally chunking) responses when complete is called */
 bool responseComplete(Response rsp, int *remaining){
+    if(rsp == NULL){
+        return false;
+    }
+    if(rsp->partialHead){
+        return false;
+    }
     Header h;
+    char *headers;
+    toStringHeader(rsp->headers, &headers);
     if((h = getHeader(rsp->headers, "Content-Length")) != NULL){
         int clen = atoi(h->value);
+        int rem = clen - rsp->bodyLen;
         if(remaining != NULL){
-            *remaining = clen - rsp->bodyLen;
+            *remaining = rem;
         }
-        return (rsp->bodyLen >= clen);
+        return (rem == 0);
     }else if(rsp->chunkRemain == 0){
         finalizeResponse(rsp);
         return true;
@@ -201,10 +246,14 @@ bool responseComplete(Response rsp, int *remaining){
 
 /* Responses with partial header cannot be determined, so store unconditionally */
 bool responseStoreForward(Response rsp){
-    if(rsp->partialHeader){
-        return true;
-    }
-    return rsp->storeForwrad;
+    return false;
+    // fprintf(stderr, "Store Forward check\n");
+    // if(rsp->partialHead){
+    //     fprintf(stderr, "returned true\n");
+    //     return true;
+    // }
+    // fprintf(stderr, "returned %d\n", rsp->storeForward);
+    // return rsp->storeForward;
 }
 
 /* Returns true if header component complete */
@@ -218,6 +267,7 @@ static bool appendPartial(Response *rspp, char *msg, int len){
     if(!partialHeader(msg, len)){
         Response tmp = responseNew(rsp->body, rsp->bodyLen);
         responseFree(rsp);
+        tmp->storeForward = true;
         *rspp = tmp;
         return true;
     }
@@ -225,7 +275,7 @@ static bool appendPartial(Response *rspp, char *msg, int len){
 }
 
 bool responseAppendBody(Response *rspp, char *msg, int len){
-    if((*rspp)->partialHeader){
+    if((*rspp)->partialHead){
         appendPartial(rspp, msg, len);
         return (*rspp)->complete;
     }
@@ -264,7 +314,7 @@ bool responseAppendBody(Response *rspp, char *msg, int len){
                     sscanf(msg, "%x\r\n%n", &chunkLen, &hexLen);
                     msg += hexLen;
                     len -= hexLen;
-                }while(chunkLen < len); /* Warn: Mixed sign comparison */
+                }while(chunkLen < len);
 
                 if(chunkLen == 0){
                     (*rspp)->complete = true;
@@ -278,11 +328,17 @@ bool responseAppendBody(Response *rspp, char *msg, int len){
         }
     }else{
         int rem;
+        char *rspStr;
+        responseToString(*rspp, &rspStr);
+        fprintf(stderr, "Chunk remain: %d\n", (*rspp)->chunkRemain);
+        fprintf(stderr, "CHECKING IF COMPLETE ON \n%s\n", rspStr);
+        
+
         responseComplete((*rspp), &rem);
         if(rem == len){
             (*rspp)->complete = true;
         }else if(rem < len){
-            fprintf(stderr, "Appending message %d larger than expected size... %d, yolo?\n", (len - rem), rem);
+            fprintf(stderr, "Appending message %d larger than expected size... %d, yolo?\n%s", (len - rem), rem, msg);
             (*rspp)->complete = true;
         }
         if((*rspp)->bodyLen == 0){

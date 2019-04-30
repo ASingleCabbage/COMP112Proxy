@@ -10,6 +10,8 @@ typedef struct Header{
     struct Header *next;
 } *Header;
 
+Header dupHeadList(Header head);
+
 Header getHeader(Header head, char *fieldname);
 
 /* strings passed in add and appendHeader are freeable afterwards */

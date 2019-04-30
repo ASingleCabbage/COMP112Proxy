@@ -1,7 +1,48 @@
 #include "http_header.h"
 #include <string.h>
+#include <ctype.h>
 #include <stdlib.h>
 #define BUF_SIZE 128
+
+static void stripRearSpace(char *str, int len){
+    int index;
+    if(len < 0){
+        index = strlen(str) - 1;
+    }else{
+        index = len - 1;
+    }
+    while(index >= 0){
+        if(isspace(str[index])){
+            str[index] = '\0';
+        }else{
+            return;
+        }
+        index--;
+    }
+}
+
+static Header dupNode(Header node){
+    Header h = malloc(sizeof(struct Header));
+    h->name = strdup(node->name);
+    h->value = strdup(node->value);
+    h->next = NULL;
+    return h;
+}
+
+Header dupHeadList(Header head){
+    if(head == NULL){
+        return NULL;
+    }
+    
+    Header newHead = dupNode(head);
+    Header tmp = newHead;
+    while(head->next != NULL){
+        head = head->next;
+        tmp->next = dupNode(head);
+        tmp = tmp->next;
+    }
+    return newHead;
+}
 
 Header getHeader(Header head, char *fieldname){
     while(head != NULL){
@@ -13,20 +54,37 @@ Header getHeader(Header head, char *fieldname){
     return NULL;
 }
 
+/* Adds to back unconditionally */
+static void addToBack(Header *headp, char *name, char *value){
+    if(*headp == NULL){
+        *headp = malloc(sizeof(struct Header));
+        (*headp)->name = strdup(name);
+        (*headp)->value = strdup(value);
+        (*headp)->next = NULL;
+    }else{
+        Header header = *headp;
+        while (header->next != NULL){
+            header = header->next;
+        }
+        header->next = malloc(sizeof(struct Header));
+        header->next->name = strdup(name);
+        header->next->value = strdup(value);
+        header->next->next = NULL;
+    }
+}
+
+
 /* Replaces existing if exists */
+/* Add to end of linked list; inefficient without a back pointer */
 void addHeader(Header *headp, char *name, char *value){
     Header header = getHeader(*headp, name);
     if(header == NULL){
-        Header header = malloc(sizeof(struct Header));
-        header->name = name;
-        header->value = value;
-        header->next = *headp;
-        *headp = header;
+        addToBack(headp, name, value);
     }else{
         free(header->name);
         free(header->value);
-        header->name = name;
-        header->value = value;
+        header->name = strdup(name);
+        header->value = strdup(value);
     }
 }
 
@@ -62,12 +120,7 @@ void removeHeader(Header *headp, char *name){
 void appendHeader(Header *headp, char *name, char *value){
     Header header = getHeader(*headp, name);
     if(header == NULL){
-        /* Identical with addHeader */
-        Header header = malloc(sizeof(struct Header));
-        header->name = name;
-        header->value = value;
-        header->next = *headp;
-        *headp = header;
+        addToBack(headp, name, value);
     }else{
         /* adding 1 for null terminator, and 1 for ; seperator*/
         int len1 = strlen(header->value);
@@ -123,16 +176,24 @@ int toStringHeader(Header h, char **strp){
 }
 
 bool headerHasValue(Header h, char *target, char *delim){
+    if(h == NULL){
+        return false;
+    }
     char *vals = strdup(h->value);
 
+    
+    
     char *token = strsep(&vals, delim); /*whitespace may need stripping, not sure*/
+    
     while(vals != NULL){
         if(strlen(token) < 1){
             break;
         }
+        stripRearSpace(token, -1);
         if(strcmp(token, target) == 0){
             return true;
         }
         token = strsep(&vals, ",");
     }
+    return false;
 }

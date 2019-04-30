@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <assert.h>
+#include <ctype.h>
 
 #define FIELD_BUFFER_SIZE 2000
 
@@ -14,15 +15,30 @@ struct request{
     char *body;
 };
 
+static void stripRearSpace(char *str, int len){
+    int index;
+    if(len < 0){
+        index = strlen(str) - 1;
+    }else{
+        index = len - 1;
+    }
+    while(index >= 0){
+        if(isspace(str[index])){
+            str[index] = '\0';
+        }else{
+            return;
+        }
+        index--;
+    }
+}
+
 Request requestNew(char * message, size_t length){
     // fprintf(stderr, "MESSAGE:\n%s\n", message);
     if(length <= 0){
         return NULL;
     }
 
-    char *msg = malloc(length + 1);
-    memcpy(msg, message, length);
-    msg[length] = '\0'; //making it a c string so strsep wont overfloA
+    char *msg = strdup(message);
     char *rest = msg;
     char *token;
 
@@ -38,9 +54,7 @@ Request requestNew(char * message, size_t length){
         req->method = OTHER;
         free(msg);
 
-        msg = malloc(length + 1);
-        memcpy(msg, message, length);
-        msg[length] = '\0';
+        msg = strdup(message);
         req->body = msg;
         req->port = length;
         return req;
@@ -49,8 +63,7 @@ Request requestNew(char * message, size_t length){
     req->port = -1;
 
     token = strsep(&rest, " ");
-    req->uri = malloc(strlen(token) + 1);
-    strcpy(req->uri, token);
+    req->uri = strdup(token);
 
     char uriNoPort[FIELD_BUFFER_SIZE];
     sscanf(token, "%[^:]:%d", uriNoPort, &(req->port));
@@ -62,32 +75,25 @@ Request requestNew(char * message, size_t length){
 
     token = strsep(&rest, "\n");
 
-    char *fieldname;
     while(token != NULL){
         // fprintf(stderr, "TOKEN (%d): %d\n",strlen(token), *token);
         if(strlen(token) == 0 || *token == '\r'){
             break;
         }
-        char *tk1 = strsep(&token, ":");
-        if(tk1 == NULL || token == NULL || *tk1 == '\0'){
+        char *fieldname = strsep(&token, ":");
+        if(fieldname == NULL || token == NULL || *fieldname == '\0'){
             break;
         }
-        fieldname = malloc(strlen(tk1) + 1);
-        strcpy(fieldname, tk1);
 
-        token += 1;
-        int tokLen = strlen(token);
-        char *fieldval = malloc(tokLen + 1);
-        memcpy(fieldval, token, tokLen);
-        fieldval[tokLen - 1] = '\0';
+        char *fieldval = token + 1;
 
         if(strcmp(fieldname, "Host") == 0){
             char *host = strsep(&fieldval, ":");
-            int hostLen = strlen(host);
-            req->host = malloc(hostLen + 1);
-            memcpy(req->host, host, hostLen + 1);
-            // (req->host)[strlen(host)] = '\0';
+            stripRearSpace(host, -1);
+            req->host = strdup(host);
         }else{
+            stripRearSpace(fieldname, -1);
+            stripRearSpace(fieldval, -1);
             addHeader(&(req->headers), fieldname, fieldval);
         }
         token = strsep(&rest, "\n");
@@ -95,8 +101,7 @@ Request requestNew(char * message, size_t length){
     int bodyLen;
     if(rest != NULL && (bodyLen = strlen(rest) + 1) != 1)
     if(bodyLen != 0){
-        req->body = malloc(bodyLen);
-        memcpy(req->body, rest, bodyLen);
+        req->body = strdup(rest);
     }
 
     free(msg);
@@ -148,6 +153,9 @@ int requestToString(Request req, char **strp){
         case CONNECT:
             meth = "CONNECT";
             break;
+        case POST:
+            meth = "POST";
+            break;
         default:
             fprintf(stderr, "Error: attempting to print out an unsupported HTTP method\n");
             *strp = malloc(req->port + 1);
@@ -177,18 +185,17 @@ int requestToString(Request req, char **strp){
 
     if(req->host != NULL){
         if(req->port < 0){
-            sprintf(hostfield, "Host: %s\r\n", req->host);
+            sprintf(hostfield, "Host: %s", req->host);
         }else{
-            sprintf(hostfield, "Host: %s:%d\r\n", req->host, req->port);
+            sprintf(hostfield, "Host: %s:%d", req->host, req->port);
         }
     }
 
-
     int len;
     if(req->body == NULL){
-        sprintf(*strp, "%s %s %s\r\n%s%s\r\n%n", meth, req->uri, "HTTP/1.1", hostfield, headStr, &len);
+        sprintf(*strp, "%s %s %s\r\n%s\r\n%s\r\n%n", meth, req->uri, "HTTP/1.1", hostfield, headStr, &len);
     }else{
-        sprintf(*strp, "%s %s %s\r\n%s%s\r\n%s%n", meth, req->uri, "HTTP/1.1", hostfield, headStr, req->body, &len);
+        sprintf(*strp, "%s %s %s\r\n%s\r\n%s\r\n%s%n", meth, req->uri, "HTTP/1.1", hostfield, headStr, req->body, &len);
     }
     free(headStr);
     return len;

@@ -51,10 +51,10 @@ Response cache_get(Cache csh, Request req, int *agep)
     }
     fprintf(stderr, "Cache query for %s\n", uri);
 
-
     if (entry == NULL){
         return NULL;
     }else if(entry->expireTime != 0 && entry->expireTime < time(NULL)){
+        fprintf(stderr, "FOUND BUT EXPIRED\n");
         free(entry->response);
         free(entry);
         return NULL;
@@ -76,9 +76,11 @@ Response cache_get(Cache csh, Request req, int *agep)
         sprintf(ageHeader->value, "%d", age);
     }
     fprintf(stderr, "Cache hit for %s\n", uri);
-    return entry->response;
+    return responseDuplicate(entry->response);
+    // return entry->response;
 }
 
+/* return value as an indicator if its freeable */
 bool cache_add(Cache csh, Request req, Response rsp)
 {
     if(req == NULL || rsp == NULL){
@@ -95,8 +97,13 @@ bool cache_add(Cache csh, Request req, Response rsp)
 
     CEntry entry = calloc(1, sizeof(struct cacheEntry));
     entry->insertionTime = time(NULL);
-    entry->expireTime = entry->insertionTime + expiry;
-    entry->response = rsp;
+    if(expiry == 0){
+        entry->expireTime = 0;
+    }else{
+        
+        entry->expireTime = entry->insertionTime + expiry;
+    }
+    entry->response = responseDuplicate(rsp);
 
     if(*uri == '/'){
         /* absolute path mode, append to host */
@@ -110,10 +117,10 @@ bool cache_add(Cache csh, Request req, Response rsp)
         fprintf(stderr, "Inserting uri: %s, expiry at %d\n", fullPath, expiry);
         Table_put(csh, fullPath, entry);
     }else{
-        char *fullPath = malloc(URI_LEN);
+        char *fullPath = strdup(uri);
         strcpy(fullPath, uri);
-        fprintf(stderr, "Inserting uri: %s, expiry at %d\n", uri, expiry);
-        Table_put(csh, uri, entry);
+        fprintf(stderr, "Inserting uri: %s, expiry at %d\n", fullPath, expiry);
+        Table_put(csh, fullPath, entry);
     }
 
     return true;
