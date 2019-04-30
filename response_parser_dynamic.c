@@ -11,6 +11,7 @@ struct response{
     char *reason;
     Header headers;
     char *body;
+    bool storeForwrad;
     bool partialHeader;
     int bodyLen;
     int chunkRemain;
@@ -98,6 +99,9 @@ Response responseNew(char * message, size_t length){
     }
 
     Header h;
+    if((h = getHeader(rsp->headers, "Content-Type")) != NULL && headerHasValue(h, "text/html", ";")){
+        rsp->storeForwrad = true;
+    }
     if((h = getHeader(rsp->headers, "Content-Length")) != NULL){
         rsp->chunkRemain = -1;
         rsp->body = calloc(1, atoi(h->value) + 1);
@@ -179,6 +183,7 @@ static void finalizeResponse(Response rsp){
     rsp->chunkRemain = -1;
 }
 
+/* Finalizes (replace transfer encoding if originally chunking) responses when complete is called */
 bool responseComplete(Response rsp, int *remaining){
     Header h;
     if((h = getHeader(rsp->headers, "Content-Length")) != NULL){
@@ -192,6 +197,14 @@ bool responseComplete(Response rsp, int *remaining){
         return true;
     }
     return (rsp->chunkRemain == -1); /* returns true if not chunked */
+}
+
+/* Responses with partial header cannot be determined, so store unconditionally */
+bool responseStoreForward(Response rsp){
+    if(rsp->partialHeader){
+        return true;
+    }
+    return rsp->storeForwrad;
 }
 
 /* Returns true if header component complete */
@@ -210,8 +223,6 @@ static bool appendPartial(Response *rspp, char *msg, int len){
     }
     return false;
 }
-
-
 
 bool responseAppendBody(Response *rspp, char *msg, int len){
     if((*rspp)->partialHeader){

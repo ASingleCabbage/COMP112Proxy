@@ -16,6 +16,8 @@ void responseFree(Response rsp);
 
 bool responseComplete(Response rsp, int *remainLen);
 
+bool responseStoreForward(Response rsp);
+
 /* reason phrase is read only */
 int responseStatus(Response rsp, char **reasonp);
 

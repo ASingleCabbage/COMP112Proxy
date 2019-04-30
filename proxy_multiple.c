@@ -2,15 +2,9 @@
     Multiple client proxy
     Sequential benchmark: 9064ms
     Current focus:
-        Integrating caching functions
-            --> bugs
-                    response header has memory allocated by request ?????
-
+        Integrating caching functions, mostly done but bugs
         Store and forward mode and determining which response types to use that
-        Modify transfer encoding (chunked --> plain) headers in the tostring function
         New module focusing on Content Inspection functions
-
-        HTTP doesn't work lol
 
     Pending features:
         Partial handling
@@ -34,7 +28,6 @@
     Preformance improvemnets
         look into multithreading? <--- no fuck that
     Notes:
-        SSL Certificates, needs some sort of caching as well...
         Memory allocations and frees are all over the freakin place
 */
 
@@ -238,7 +231,7 @@ int main(int argc, char **argv){
                                     responseFree(ss->response);
                                 }
                             }
-fprintf(stderr, "FREE3\n");
+                            fprintf(stderr, "FREE3\n");
                             requestFree(ss->request);
                             free(ss);
                         }
@@ -272,9 +265,6 @@ fprintf(stderr, "FREE3\n");
                             fprintf(stderr, "FREE4\n");
                             // requestFree(ps->request);    /* Freeing this causes issue?? */
                             free(ps);
-
-                            // assert(DTable_get(dt, clientSock) == NULL);
-                            // assert(DTable_get(dt, serverSock) == NULL);
 
                             close(clientSock);
                             close(serverSock);
@@ -337,11 +327,9 @@ fprintf(stderr, "FREE3\n");
                         }else{
                             /* plain HTTP, with write queued */
                             state->state = CLIENT_READ;
-
                             char *msg;
                             int msgLen = requestToString(state->request, &msg);
                             WBuf_put(wb, HTTP_TYPE, state->serverSock, msg, msgLen);
-
                             DTable_remove(dt, state->clientSock, state->serverSock);
                             DTable_put(dt, state->clientSock, state->serverSock, state);
                             fprintf(stderr, "PLAIN server connected %i ---> %d\n", state->clientSock, state->serverSock);
@@ -374,10 +362,8 @@ int handleWrite(int destSock, WriteEntry we, DTable dt){
     }else{
         // fprintf(stderr, "Writing to socket %d (plain) (%d)\n%s\n", destSock, we->msgLen, we->message);
         stat = write(destSock, we->message, we->msgLen);
-        // fprintf(stderr, "returned stat %d\n", stat);
-
     }
-    //free(we->message);
+    free(we->message); /* This may cause issues (?) */
     free(we);
     return stat;
 }
@@ -406,21 +392,25 @@ int handleSSLRead(int sourceSock, SSLState state, WriteBuffer wb, fd_set *wsp, C
     }
 
     // fprintf(stderr, "Message from %d\n", sourceSock);
+    bool storeForward = false;
     SSL *source;
     SSL *dest;
     if(SSL_get_fd(state->clientSSL) == sourceSock){
         if(state->state == SERVER_READ){
-            /* Subsequent requests on same connection; clearing out old request for new one */
-            /* Cache insertion from here */
-            state->state = CLIENT_READ;
+            /* Transitioning from server read to client read; clearing out old request for new one */
+            // if(responseStoreForward(state->response)){
+            //     char *rspStr;
+            //     int rspLen = responseToString(rsp, &rspStr);
+            //     WBuf_put(wb, SSL_TYPE, SSL_get_fd(state->clientSSL), rspStr, rspLen);
+            // }
+
+            /* Cache insertion */
             if(responseComplete(state->response, NULL)){
-                if(responseComplete(state->response, NULL)){
-                    if(!cache_add(csh, state->request, state->response)){
-                        responseFree(state->response);
-                    }
-                }else{
+                if(!cache_add(csh, state->request, state->response)){
                     responseFree(state->response);
                 }
+            }else{
+                responseFree(state->response);
             }
             fprintf(stderr, "FREE6\n");
             requestFree(state->request);
@@ -441,7 +431,6 @@ int handleSSLRead(int sourceSock, SSLState state, WriteBuffer wb, fd_set *wsp, C
         return SSL_get_error(source, bytes);
     }
 
-
     if(state->state == SERVER_READ){
         if(state->response == NULL){
             state->response = responseNew(msg, bytes);
@@ -450,6 +439,7 @@ int handleSSLRead(int sourceSock, SSLState state, WriteBuffer wb, fd_set *wsp, C
         }
     }else{
         if(state->request != NULL){
+            /* new, subsequent request from client, clear out old request/responses */
             responseFree(state->response);
             state->response = NULL;
             fprintf(stderr, "FREE7\n");
@@ -463,12 +453,14 @@ int handleSSLRead(int sourceSock, SSLState state, WriteBuffer wb, fd_set *wsp, C
             fprintf(stderr, "Response serviced from cache - SSL\n");
             char *rspStr;
             int len = responseToString(state->response, &rspStr);
+
+            /* Cached response, just check if it is applicable for inspection and then send it */
             WBuf_put(wb, HTTP_TYPE, sourceSock, rspStr, len);
             FD_SET(SSL_get_fd(state->clientSSL), wsp);
             return SSL_ERROR_NONE;
         }
     }
-    // fprintf(stderr, "Add to write buffer\n");
+    /* Check if message is a response, and check if its store forward */
     WBuf_put(wb, SSL_TYPE, SSL_get_fd(dest), msg, bytes);
     FD_SET(SSL_get_fd(dest), wsp);
     return SSL_ERROR_NONE;
@@ -495,23 +487,20 @@ int handleRead(int sourceSock, GenericState *statep, WriteBuffer wb, DTable dt, 
     GenericState state = DTable_get(dt, sourceSock);
     if(state == NULL){
         /* Fresh connection */
-        // fprintf(stderr, "FRESH\n");
         Request req = requestNew(incoming, n);
-
         if(req == NULL){
             fprintf(stderr, "Error when parsing request\n");
             free(incoming);
             return -1;
         }
-
         int destSock = connectServer(req);
         if(destSock < 0){
             free(incoming);
-            fprintf(stderr, "FREE1\n");
             requestFree(req);
             return -1;
         }
 
+        /* Creating a temporary state while connect is still ongoing */
         *statep = (GenericState) initPlainState(sourceSock, destSock);
         if(requestMethod(req) == CONNECT){
             (*statep)->type = SSL_TYPE;
@@ -522,7 +511,7 @@ int handleRead(int sourceSock, GenericState *statep, WriteBuffer wb, DTable dt, 
         free(incoming);
         return destSock;
     }else{
-        // fprintf(stderr, "EXISTING HTTP\n");
+        /* Existing HTTP connections */
         PlainState ps = (PlainState) state;
         int destSock;
         if(ps->clientSock == sourceSock){
@@ -553,23 +542,21 @@ int handleRead(int sourceSock, GenericState *statep, WriteBuffer wb, DTable dt, 
                     FD_SET(sourceSock, wsp);
                     return sourceSock;
                 }
-            }else{
-                fprintf(stderr, "MULTIPLE NON SSL REQUESTS\n");
             }
             ps->request = newReq;
             ps->state = CLIENT_READ;
             destSock = ps->serverSock;
         }else{
-            // attachPartial(state, incoming, n);
             if(state->response == NULL){
                 state->response = responseNew(incoming, n);
             }else{
-                /* Assuming headers get transfered in one chunk */
                 responseAppendBody(&(state->response), incoming, n);
             }
+            /* check here if response is complete; if so, check store forward, and add to write buffer it true */
             ps->state = SERVER_READ;
             destSock = ps->clientSock;
         }
+        /* somewhere check if incoming is a response, and if response is store forward */
         WBuf_put(wb, HTTP_TYPE, destSock, incoming, n);
         FD_SET(sourceSock, wsp);
         return destSock;

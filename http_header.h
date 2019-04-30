@@ -1,6 +1,7 @@
 #ifndef HTTP_HEADER
 #define HTTP_HEADER
 
+#include <stdbool.h>
 typedef enum {GET, CONNECT, POST, OTHER} httpMethod;
 
 typedef struct Header{
@@ -20,6 +21,8 @@ void removeHeader(Header *headp, char *name);
 
 /* Appends values if field already exists, else create a new header entry */
 void appendHeader(Header *headp, char *name, char *value);
+
+bool headerHasValue(Header h, char *target, char *delim);
 
 void freeHeader(Header head);
 

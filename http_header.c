@@ -121,3 +121,18 @@ int toStringHeader(Header h, char **strp){
     (*strp)[length] = '\0';
     return length;
 }
+
+bool headerHasValue(Header h, char *target, char *delim){
+    char *vals = strdup(h->value);
+
+    char *token = strsep(&vals, delim); /*whitespace may need stripping, not sure*/
+    while(vals != NULL){
+        if(strlen(token) < 1){
+            break;
+        }
+        if(strcmp(token, target) == 0){
+            return true;
+        }
+        token = strsep(&vals, ",");
+    }
+}
