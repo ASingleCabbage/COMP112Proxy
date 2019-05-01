@@ -376,7 +376,7 @@ void responseUpdateBody(Response rsp, char *newBody, int newLen){
 
     char lenStr[10];
     sprintf(lenStr, "%d", newLen);
-    Header h = addHeader(rsp->headers, "Content-Length", lenStr);
+    addHeader(&(rsp->headers), "Content-Length", lenStr);
 }
 
 int responseToString(Response rsp, char **strp){
