@@ -368,6 +368,17 @@ void responseAddHeader(Response rsp, char *fieldname, char *fieldval){
     addHeader(&(rsp->headers), fieldname, fieldval);
 }
 
+void responseUpdateBody(Response rsp, char *newBody, int newLen){
+    free(rsp->body);
+    rsp->bodyLen = newLen;
+    rsp->body = malloc(newLen + 1);
+    memcpy(rsp->body, newBody, newLen);
+
+    char lenStr[10];
+    sprintf(lenStr, "%d", newLen);
+    Header h = addHeader(rsp->headers, "Content-Length", lenStr);
+}
+
 int responseToString(Response rsp, char **strp){
     char *headStr;
     int headLen;

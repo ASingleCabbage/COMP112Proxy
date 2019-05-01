@@ -29,6 +29,8 @@ void responseAddHeader(Response rsp, char *fieldname, char *fieldval);
 
 int responseBody(Response rsp, char **bodyp);
 
+void responseUpdateBody(Response rsp, char *newBody, int newLen);
+
 int responseToString(Response rsp, char **strp);
 
 Response responseDuplicate(Response rsp);
