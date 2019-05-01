@@ -24,7 +24,7 @@ void initInspector(){
 
     inspector_wordlist = malloc(WORDLIST_LEN_HINT);
     inspector_wordlist_len = 1;
-    inspector_wordlist[0] = strdup("endgame");
+    inspector_wordlist[0] = strdup("network");
     fprintf(stderr, "[INSPECTOR] Initialized\n");
 }
 
@@ -103,14 +103,15 @@ static void OwO(char *start, char *end){
                 start[i] = '<';
                 return;
         }
+        i++;
     }
-};
+}
 
 static void censorHtml(char *html, int len){
     fprintf(stderr, "[INSPECTOR] Redacting blacklisted terms\n");
-    char *start = NULL;
     bool styleZone = false;
     bool scriptZone = false;
+    char *start = NULL;
     for(int i = 0; i < len; i++){
         if(html[i] == '<'){
             /* assumes no nested tag strings */
@@ -127,7 +128,8 @@ static void censorHtml(char *html, int len){
                 i += 5;
                 styleZone = true;
             }else if(start != NULL){
-            censorRegion(start, html + i);
+                censorRegion(start, html + i);
+                OwO(start, html + i);
             }
         }else if(html[i] == '>'){
             if(!styleZone && !scriptZone){
