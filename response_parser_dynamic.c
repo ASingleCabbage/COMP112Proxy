@@ -210,7 +210,7 @@ static void finalizeResponse(Response rsp){
     responseToString(rsp, &msgStr);
 
     if(rsp->chunkRemain != -1){
-        fprintf(stderr, "CHUNK %d, body len %d\n", rsp->chunkRemain, rsp->bodyLen);
+        // fprintf(stderr, "CHUNK %d, body len %d\n", rsp->chunkRemain, rsp->bodyLen);
 
         char lenStr[10];
         sprintf(lenStr, "%d", rsp->bodyLen);
@@ -246,14 +246,14 @@ bool responseComplete(Response rsp, int *remaining){
 
 /* Responses with partial header cannot be determined, so store unconditionally */
 bool responseStoreForward(Response rsp){
-    return false;
-    // fprintf(stderr, "Store Forward check\n");
-    // if(rsp->partialHead){
-    //     fprintf(stderr, "returned true\n");
-    //     return true;
-    // }
-    // fprintf(stderr, "returned %d\n", rsp->storeForward);
-    // return rsp->storeForward;
+    fprintf(stderr, "Store Forward check\n");
+    if(rsp->partialHead){
+        fprintf(stderr, "returned true\n");
+        return true;
+    }
+    fprintf(stderr, "returned %d\n", rsp->storeForward);
+    return rsp->storeForward;
+    // return false;
 }
 
 /* Returns true if header component complete */
@@ -330,15 +330,12 @@ bool responseAppendBody(Response *rspp, char *msg, int len){
         int rem;
         char *rspStr;
         responseToString(*rspp, &rspStr);
-        fprintf(stderr, "Chunk remain: %d\n", (*rspp)->chunkRemain);
-        fprintf(stderr, "CHECKING IF COMPLETE ON \n%s\n", rspStr);
-        
 
         responseComplete((*rspp), &rem);
         if(rem == len){
             (*rspp)->complete = true;
         }else if(rem < len){
-            fprintf(stderr, "Appending message %d larger than expected size... %d, yolo?\n%s", (len - rem), rem, msg);
+            fprintf(stderr, "Appending message %d larger than expected size... %d, yolo?\n", (len - rem), rem);
             (*rspp)->complete = true;
         }
         if((*rspp)->bodyLen == 0){

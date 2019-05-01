@@ -9,6 +9,7 @@
     Problems:
         HTTP requests transmitted are always not understood by the server???
         Do more response frees; cache copy by value
+        Inspector needs a way to close the connection
 
     Pending features:
         Partial handling
@@ -339,8 +340,13 @@ int main(int argc, char **argv){
                             if((rsp = cache_get(csh, state->request, NULL)) != NULL){
                                 /* Check if applicable for inspection here as well */
                                 fprintf(stderr, "Initial request serviced from cache\n");
+                                if(responseholdResponse(rsp)){
+                                    fprintf(stderr, "WI1\n");
+                                    inspectResponse(rsp);
+                                }
                                 msgLen = responseToString(rsp, &msg);
                                 WBuf_put(wb, HTTP_TYPE, state->clientSock, msg, msgLen);
+
                             }else{
                                 msgLen = requestToString(state->request, &msg);
                                 WBuf_put(wb, HTTP_TYPE, state->serverSock, msg, msgLen);
@@ -372,10 +378,10 @@ int handleWrite(int destSock, WriteEntry we, DTable dt){
         }else{
             destSSL = state->clientSSL;
         }
-        // fprintf(stderr, "Writing to socket %d (ssl) \n%s\n", destSock, we->message);
+        fprintf(stderr, "Writing to socket %d (ssl) \n%s\n", destSock, we->message);
         stat = SSL_write(destSSL, we->message, we->msgLen);
     }else{
-        // fprintf(stderr, "Writing to socket %d (plain) (%d)\n%s\n", destSock, we->msgLen, we->message);
+        fprintf(stderr, "Writing to socket %d (plain) (%d)\n%s\n", destSock, we->msgLen, we->message);
         stat = write(destSock, we->message, we->msgLen);
     }
     free(we->message); /* This may cause issues (?) */
@@ -406,7 +412,7 @@ int handleSSLRead(int sourceSock, SSLState state, WriteBuffer wb, fd_set *wsp, C
     }
 
     // fprintf(stderr, "Message from %d\n", sourceSock);
-    bool storeForward = false;
+    bool holdResponse = false;
     SSL *source;
     SSL *dest;
     if(SSL_get_fd(state->clientSSL) == sourceSock){
@@ -441,21 +447,27 @@ int handleSSLRead(int sourceSock, SSLState state, WriteBuffer wb, fd_set *wsp, C
         }else{
             responseAppendBody(&(state->response), msg, bytes);
         }
-        storeForward = responseStoreForward(state->response);
+        holdResponse = responseStoreForward(state->response);
 
         if(responseComplete(state->response, NULL)){
-            if(storeForward){
+            fprintf(stderr, "SSL - Response Complete\n");
+            cache_add(csh, state->request, state->response);
+
+            if(holdResponse){
+                fprintf(stderr, "STORE FORWARD MODE\n");
                 cache_add(csh, state->request, state->response);
-                writeInspect(wb, SSL_TYPE, SSL_get_fd(state->clientSSL), state->response);
-                FD_SET(sourceSock, wsp);
-                return SSL_ERROR_NONE;
-            }else if(!cache_add(csh, state->request, state->response)){
+                
+                fprintf(stderr, "WI2\n");
+                inspectResponse(state->response);
+                free(msg);
+                bytes = responseToString(state->response, );
+            }else{
                 responseFree(state->response);
                 state->response = NULL;
             }
+        }else{
+            fprintf(stderr, "RESPONSE NOT COMPLETE\n");
         }
-        fprintf(stderr, "COMPLETED\n");
-
     }else{
         if(state->request != NULL){
             /* new, subsequent request from client, clear out old request/responses */
@@ -477,7 +489,8 @@ int handleSSLRead(int sourceSock, SSLState state, WriteBuffer wb, fd_set *wsp, C
             int len = responseToString(state->response, &rspStr);
 
             if(responseStoreForward(state->response)){
-                writeInspect(wb, SSL_TYPE, SSL_get_fd(state->clientSSL), state->response);
+                fprintf(stderr, "WI3\n");
+                inspectResponse(wb, SSL_TYPE, SSL_get_fd(state->clientSSL), state->response);
             }else{
                 WBuf_put(wb, SSL_TYPE, sourceSock, rspStr, len);
             }
@@ -489,10 +502,10 @@ int handleSSLRead(int sourceSock, SSLState state, WriteBuffer wb, fd_set *wsp, C
 
 
     /* Check if message is a response, and check if its store forward */
-    if(!storeForward){
+
         WBuf_put(wb, SSL_TYPE, SSL_get_fd(dest), msg, bytes);
         FD_SET(SSL_get_fd(dest), wsp);
-    }
+
     return SSL_ERROR_NONE;
 }
 
@@ -592,9 +605,11 @@ int handleRead(int sourceSock, GenericState *statep, WriteBuffer wb, DTable dt, 
                 // char *msgStr;
                 // responseToString(state->response, &msgStr);
                 // // fprintf(stderr, "MSG:\n%s\n", msgStr);
-                if(responseStoreForward(state->response)){
+                if(responseholdResponse(state->response)){
                     cache_add(csh, state->request, state->response);
-                    writeInspect(wb, HTTP_TYPE, ps->clientSock, state->response);
+                    
+                    fprintf(stderr, "WI4\n");
+                    inspectResponse(wb, HTTP_TYPE, ps->clientSock, state->response);
                     FD_SET(sourceSock, wsp);
                     return ps->clientSock;
                 }
@@ -603,7 +618,7 @@ int handleRead(int sourceSock, GenericState *statep, WriteBuffer wb, DTable dt, 
                     state->response = NULL;
                 }
             }
-            storeForwrad = responseStoreForward(state->response);
+            storeForwrad = responseholdResponse(state->response);
             ps->state = SERVER_READ;
             destSock = ps->clientSock;
         }
