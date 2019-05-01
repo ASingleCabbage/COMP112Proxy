@@ -61,7 +61,7 @@
 #define LISTEN_BACKLOG 6
 #define BUF_SIZE 3000
 #define DEFAULT_PORT 80
-#define TIMEOUT_SEC 5
+#define TIMEOUT_SEC 10
 #define DT_HINT 60
 
 // todo consider making a network_util module to reduce clutter
@@ -101,11 +101,11 @@ int initTcpSock(int port){
     serveraddr.sin_port = htons((unsigned short) port);
 
     if(bind(sock, (struct sockaddr *)&serveraddr, sizeof(serveraddr)) < 0){
-        errExit("ERROR socket binding failed");
+        errExit("[PROXY] ERROR socket binding failed");
     }
 
     if(listen(sock, LISTEN_BACKLOG) < 0){
-        errExit("ERROR listening to socket failed");
+        errExit("[PROXY] ERROR listening to socket failed");
     }
 
     return sock;
@@ -117,16 +117,10 @@ void queueOkConnect(int destSock, WriteBuffer wb){
     WBuf_put(wb, HTTP_TYPE, destSock, rspString, strlen(rspString));
 }
 
-void writeLog(char *msg, char *mode){
-    FILE *file = fopen("log.txt", mode);
-    fprintf(file, msg);
-    fclose(file);
-}
-
 int main(int argc, char **argv){
     if(argc != 2){
         errno = EINVAL;
-        errExit("ERROR");
+        errExit("[PROXY] ERROR");
     }
     int port = (int)strtol(argv[1], NULL, 10);
     int mSock = initTcpSock(port);
@@ -156,24 +150,19 @@ int main(int argc, char **argv){
 
     SSLState sslState;
 
-    printf("Server running on address %d port %d\n", INADDR_ANY, port);
+    printf("[PROXY] Server running on address %d port %d\n", INADDR_ANY, port);
     while(true){
         read_fd_set = active_read_set;
         write_fd_set = active_write_set;
 
         n = select(FD_SETSIZE, &read_fd_set, &write_fd_set, NULL, &timeout);
-        fprintf(stderr, "LOOP\n");
+        // fprintf(stderr, "[PROXY] STANDING BY\n");
 
         if(n < 0){
-            for (int i = 0; i < FD_SETSIZE; i++) {
-                if(FD_ISSET(i, &read_fd_set))
-                    printf("%d is in read_fd_set\n", i);
-                if(FD_ISSET(i, &write_fd_set))
-                printf("%d is in write_fd_set\n", i);
-            }
-            errExit("ERROR on select");
+            errExit("[PROXY] ERROR on select");
         }else if(n == 0){
             timeout = timeSetting;
+            fprintf(stderr, "[PROXY] STANDING BY...\n");
             /* Do something periodic like cleaning up the cache, closing connections, or sth */
 
         }else{
@@ -182,7 +171,7 @@ int main(int argc, char **argv){
                     if(i == mSock){
                         int newSock = accept(mSock, NULL, NULL);
                         if(newSock < 0){
-                            fprintf(stderr, "new connection accept failed, returned %d\n", newSock);
+                            fprintf(stderr, "[PROXY] ERROR new connection accept failed, returned %d\n", newSock);
                             /* If accept raises errors we just keep calm and
                                carry on */
                             continue;
@@ -191,16 +180,14 @@ int main(int argc, char **argv){
                     }else if(i == STDIN_FILENO){
                         /* handles stdin for debugging and stuff */
 
-                        for (int j = 0; j < FD_SETSIZE; j++) {
-                            if(FD_ISSET(j, &active_read_set))
-                                printf("%d is in active read set\n", j);
-                            if(FD_ISSET(j, &active_write_set))
-                            printf("%d is in active write set\n", j);
-                        }
-
+                        // for (int j = 0; j < FD_SETSIZE; j++) {
+                        //     if(FD_ISSET(j, &active_read_set))
+                        //         printf("%d is in active read set\n", j);
+                        //     if(FD_ISSET(j, &active_write_set))
+                        //     printf("%d is in active write set\n", j);
+                        // }
                         handleStdin();
                     }else if((sslState = DTable_get(dt, i)) != NULL && sslState->type == SSL_TYPE){
-                        fprintf(stderr, "ACTIVE SSL CASE\n");
                         /* all active SSL connections go here */
                         int err;
                         if((err = handleSSLRead(i, sslState, wb, &active_write_set, csh)) != SSL_ERROR_NONE){
@@ -213,16 +200,16 @@ int main(int argc, char **argv){
                                     }else{
                                         SSL_shutdown(sslState->serverSSL);
                                     }
-                                    fprintf(stderr, "ZERO_RETURN, normal shutdown\n");
+                                    // fprintf(stderr, "[PROXY] SSL ZERO_RETURN, normal shutdown\n");
                                     break;
                                 case SSL_ERROR_SYSCALL:
                                 case SSL_ERROR_SSL:
-                                    fprintf(stderr, "SSL_ERROR, closing connection\n");
+                                    fprintf(stderr, "[PROXY] SSL SSL_ERROR, closing connection\n");
                                     break;
                                 default:
-                                    fprintf(stderr, "UNKNOWN ERROR when reading SSL: %d\n", err);
+                                    fprintf(stderr, "[PROXY] SSL UNKNOWN ERROR when reading SSL: %d\n", err);
                             }
-                            fprintf(stderr, "closing (ssl) %d>---<%d\n", serverSock, clientSock);
+                            fprintf(stderr, "[PROXY] Closing SSL Connection %d >--//--< %d\n", clientSock, serverSock);
                             close(serverSock);
                             close(clientSock);
                             FD_CLR(serverSock, &active_read_set);
@@ -246,11 +233,10 @@ int main(int argc, char **argv){
                         GenericState state;
                         int destSock;
                         if((destSock = handleRead(i, &state, wb, dt, &active_write_set, csh)) < 0){
-                            fprintf(stderr, "Closing connection %d\n", i);
                             // todo close connection on the other size as well
                             GenericState state = DTable_get(dt, i);
                             if(state == NULL){
-                                fprintf(stderr, "Closing null state\n");
+                                fprintf(stderr, "[PROXY] Closing null state from %d\n", i);
                                 close(i);
                                 FD_CLR(i, &active_read_set);
                                 FD_CLR(i, &active_write_set);
@@ -261,6 +247,8 @@ int main(int argc, char **argv){
                             PlainState ps = (PlainState) state;
                             clientSock = ps->clientSock;
                             serverSock = ps->serverSock;
+                            fprintf(stderr, "[PROXY] Closing PLAIN Connection %d >--//--< %d\n", clientSock, serverSock);
+
                             /*
                                 client is probably done
                                 if cacheable, insert cache here - Plain case
@@ -271,11 +259,9 @@ int main(int argc, char **argv){
                             }
                             
                             DTable_remove(dt, clientSock, serverSock);
-                            // fprintf(stderr, "FREE4\n");
                             // requestFree(ps->request);    /* Freeing this causes issue?? */
                             free(ps);
 
-                            fprintf(stderr, "closing %d>---<%d\n", serverSock, clientSock);
                             close(clientSock);
                             close(serverSock);
                             FD_CLR(clientSock, &active_read_set);
@@ -289,7 +275,6 @@ int main(int argc, char **argv){
                             /* Only setting up destination socket to write set, as connection still ongoing */
                             FD_SET(destSock, &active_write_set);
                             FD_CLR(i, &active_read_set);
-                            // fprintf(stderr, "Putting table connection pair %d %d\n", i, destSock);
                             DTable_put(dt, i, destSock, state);
                         }else{
                             /* existing connections */
@@ -311,7 +296,7 @@ int main(int argc, char **argv){
                         getsockopt(i, SOL_SOCKET, SO_ERROR, &err, (socklen_t*) &errlen);
                         if(err != 0){
                             /* connect failed */
-                            fprintf(stderr, "Failed to connect to socket %d\n", i);
+                            fprintf(stderr, "[PROXY] Failed to connect to socket %d\n", i);
                             close(state->clientSock);
                             close(state->serverSock);
                             FD_CLR(i, &active_write_set);
@@ -328,9 +313,8 @@ int main(int argc, char **argv){
                             /* CONNECT request: setting up records for SSL connection */
                             SSLState sslState = initSSLState(state->clientSock, state->serverSock, ctx);
                             sslState->request = state->request;
-                            fprintf(stderr, "SSL server connected %i ---> %d\n", state->clientSock, state->serverSock);
+                            fprintf(stderr, "[PROXY] SSL server connected %i ---> %d\n", state->clientSock, state->serverSock);
                             DTable_remove(dt, state->clientSock, state->serverSock);
-                            // fprintf(stderr, "Putting table, connect request upgrading to ssl state %d %d\n", state->clientSock, state->serverSock);
                             DTable_put(dt, state->clientSock, state->serverSock, sslState);
                             queueOkConnect(state->clientSock, wb);
                             free(state);
@@ -342,9 +326,7 @@ int main(int argc, char **argv){
                             Response rsp;
                             if((rsp = cache_get(csh, state->request, NULL)) != NULL){
                                 /* Check if applicable for inspection here as well */
-                                fprintf(stderr, "Initial request serviced from cache\n");
                                 if(responseStoreForward(rsp)){
-                                    fprintf(stderr, "WI1\n");
                                     inspectResponse(rsp);
                                 }
                                 msgLen = responseToString(rsp, &msg);
@@ -356,7 +338,7 @@ int main(int argc, char **argv){
                             }
                             DTable_remove(dt, state->clientSock, state->serverSock);
                             DTable_put(dt, state->clientSock, state->serverSock, state);
-                            fprintf(stderr, "PLAIN server connected %i ---> %d\n", state->clientSock, state->serverSock);
+                            fprintf(stderr, "[PROXY] PLAIN server connected %i ---> %d\n", state->clientSock, state->serverSock);
                         }
                     }else{
                         FD_CLR(i, &active_write_set);
@@ -372,7 +354,7 @@ int handleWrite(int destSock, WriteEntry we, DTable dt){
     if(we->type == SSL_TYPE){
         SSLState state = DTable_get(dt, destSock);
         if(state == NULL){
-            fprintf(stderr, "HANDLEWRITE: no DTable entry for %d\n", destSock);
+            fprintf(stderr, "[PROXY] ERROR when writing: no DTable entry for %d\n", destSock);
             return -1;
         }
         SSL *destSSL;
@@ -381,10 +363,10 @@ int handleWrite(int destSock, WriteEntry we, DTable dt){
         }else{
             destSSL = state->clientSSL;
         }
-        fprintf(stderr, "Writing to socket %d (ssl), %d bytes\n%s\n", destSock, we->msgLen, we->message);
+        // fprintf(stderr, "[PROXY] Writing to socket %d (ssl), %d bytes\n%s\n", destSock, we->msgLen, we->message);
         stat = SSL_write(destSSL, we->message, we->msgLen);
     }else{
-        fprintf(stderr, "Writing to socket %d (plain) %d bytes\n%s\n", destSock, we->msgLen, we->message);
+        // fprintf(stderr, "[PROXY] Writing to socket %d (plain) %d bytes\n%s\n", destSock, we->msgLen, we->message);
         stat = write(destSock, we->message, we->msgLen);
     }
     free(we->message); /* This may cause issues (?) */
@@ -440,7 +422,7 @@ int handleSSLRead(int sourceSock, SSLState state, WriteBuffer wb, fd_set *wsp, C
     char *msg;
     int bytes = readSSLMessage(source, &msg);
 
-    fprintf(stderr, "Recieved SSL (%d) from %d\n", bytes, sourceSock);
+    // fprintf(stderr, "Recieved SSL (%d) from %d\n", bytes, sourceSock);
 
     if(bytes <= 0){
         return SSL_get_error(source, bytes);
@@ -456,21 +438,17 @@ int handleSSLRead(int sourceSock, SSLState state, WriteBuffer wb, fd_set *wsp, C
         holdResponse = responseStoreForward(state->response);
 
         if(responseComplete(state->response, NULL)){
-            fprintf(stderr, "SSL - Response Complete\n");
+            // fprintf(stderr, "SSL - Response Complete\n");
             cache_add(csh, state->request, state->response);
 
             if(holdResponse){
-                fprintf(stderr, "STORE FORWARD MODE\n");
                 holdResponse = false;
-                fprintf(stderr, "WI2\n");
                 inspectResponse(state->response);
                 free(msg);
                 bytes = responseToString(state->response, &msg);
                 responseFree(state->response);
                 state->response = NULL;
             }
-        }else{
-            fprintf(stderr, "RESPONSE NOT COMPLETE\n");
         }
     }else{
         if(state->request != NULL){
@@ -479,7 +457,6 @@ int handleSSLRead(int sourceSock, SSLState state, WriteBuffer wb, fd_set *wsp, C
                 responseFree(state->response);
                 state->response = NULL;
             }
-            fprintf(stderr, "FREE02\n");
             requestFree(state->request);
             state->request = NULL;
         }
@@ -488,10 +465,7 @@ int handleSSLRead(int sourceSock, SSLState state, WriteBuffer wb, fd_set *wsp, C
         state->response = cache_get(csh, state->request, NULL);
         if(state->response != NULL){
             state->fromCache = true;
-            fprintf(stderr, "Response serviced from cache - SSL\n");
-
             if(responseStoreForward(state->response)){
-                fprintf(stderr, "WI3\n");
                 inspectResponse(state->response);
             }
              
@@ -522,11 +496,11 @@ int handleRead(int sourceSock, GenericState *statep, WriteBuffer wb, DTable dt, 
     if(n == 0){
         return -1;
     }else if(n < 0){
-        fprintf(stderr, "Error when reading from socket %d\n", sourceSock);
+        fprintf(stderr, "[PROXY] ERROR when reading from socket %d\n", sourceSock);
         return -1;
     }
 
-    fprintf(stderr, "Received (%d) from %d\n", n, sourceSock);
+    // fprintf(stderr, "Received (%d) from %d\n", n, sourceSock);
 
     bool holdResponse = false;
     *statep = NULL;
@@ -537,14 +511,13 @@ int handleRead(int sourceSock, GenericState *statep, WriteBuffer wb, DTable dt, 
 
         Request req = requestNew(incoming, n);
         if(req == NULL){
-            fprintf(stderr, "Error when parsing request\n");
+            fprintf(stderr, "[PROXY] ERROR when parsing request\n");
             free(incoming);
             return -1;
         }
         int destSock = connectServer(req);
         if(destSock < 0){
             free(incoming);
-            fprintf(stderr, "FREE03\n");
             requestFree(req);
             return -1;
         }
@@ -571,7 +544,6 @@ int handleRead(int sourceSock, GenericState *statep, WriteBuffer wb, DTable dt, 
                     /* new, subsequent request from client, clear out old request/responses */
                     if(!state->fromCache){
                         responseFree(state->response);
-                        fprintf(stderr, "FREE04\n");
                         requestFree(state->request);
                     }
                     state->response = NULL;
@@ -581,7 +553,6 @@ int handleRead(int sourceSock, GenericState *statep, WriteBuffer wb, DTable dt, 
                 ps->response = cache_get(csh, newReq, NULL);
                 if(ps->response != NULL){
                     /* content inspection here as well */
-                    fprintf(stderr, "Response serviced from cache\n");
                     ps->fromCache = true;
                     char *rspStr;
                     int len = responseToString(ps->response, &rspStr);
@@ -597,36 +568,29 @@ int handleRead(int sourceSock, GenericState *statep, WriteBuffer wb, DTable dt, 
         }else{
             /* Incoming is response */
             if(state->response == NULL){
-                fprintf(stderr, "NEW RESPONSE\n");
                 state->response = responseNew(incoming, n);
             }else{
-                fprintf(stderr, "APPENDED TO RESPONSE\n");
                 responseAppendBody(&(state->response), incoming, n);
             }
             /* check here if response is complete; if so, check store forward, and add to write buffer it true */
             
             holdResponse = responseStoreForward(state->response);
             int remLen;
-            fprintf(stderr, "ping 1\n");
             if(responseComplete(state->response, &remLen)){
-                fprintf(stderr, "RESPONSE COMPLETED\n");
 
 
                 cache_add(csh, state->request, state->response);
                 if(holdResponse){    
                     holdResponse = false;    
-                    fprintf(stderr, "WI4\n");
                     inspectResponse(state->response);
                 
                     free(incoming);
                     n = responseToString(state->response, &incoming);
-                    fprintf(stderr, "%d bytes after inspection\n", n);
                 } 
 
                 responseFree(state->response);
                 state->response = NULL;
             }
-            fprintf(stderr, "RESPONSE NOT COMPLETE, %d left\n", remLen);
             ps->state = SERVER_READ;
             destSock = ps->clientSock;
         }
@@ -644,7 +608,7 @@ int connectServer(Request req){
     /* creating outbout socket, socket set to nonblocking before connecting */
     int outSock = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
     if(outSock < 0){
-        errExit("ERROR failed to create outbound socket");
+        errExit("[PROXY] ERROR failed to create outbound socket");
     }
 
     /* getting host via DNS */
@@ -660,7 +624,7 @@ int connectServer(Request req){
         server = gethostbyname(host);
     }
     if(server == NULL){
-        fprintf(stderr, "ERROR cannot find host with name [%s]\n", host);
+        fprintf(stderr, "[PROXY] ERROR cannot find host with name [%s]\n", host);
         char *reqStr;
         requestToString(req, &reqStr);
         //fprintf(stderr, "MSG:\n%s\n", reqStr);
@@ -686,10 +650,10 @@ int connectServer(Request req){
     if(connect(outSock, (const struct sockaddr *)&serveraddr, sizeof(serveraddr)) < 0){
         switch (errno) {
             case EINPROGRESS:
-                fprintf(stderr, "Started connecting to %d...\n", outSock);
+                fprintf(stderr, "[PROXY] Started connecting to %d...\n", outSock);
                 break;
             default:
-                perror("ERROR connecting");
+                perror("[PROXY] ERROR connecting");
                 return -1;
         }
     }

@@ -79,7 +79,6 @@ Response responseNew(char * message, size_t length){
     if(length <= 0){
         return NULL;
     }
-    fprintf(stderr, "New response from\n%s\n", message);
 
     char *msg = malloc(length + 1);
     memcpy(msg, message, length);
@@ -143,9 +142,6 @@ Response responseNew(char * message, size_t length){
         rsp->body = malloc(restLen + 1);
     }else{
         /* responses with no body */
-        /* not sure if this needs to be a special case */
-        fprintf(stderr, "NO BODY CASE\n");
-        // rsp->body = strdup("");
         rsp->complete = true;
         free(msg);
         return rsp; 
@@ -179,7 +175,6 @@ static void dechunk(char **inputp, int *lenp){
     int n = sscanf(*inputp, "%x\r\n%n", &chunkLen, &offset);
     while(chunkLen != 0 || n != 1){
         *inputp += offset;
-        fprintf(stderr, "Insertion position %p <-- %p, %d\n", insertion, *inputp, chunkLen);
         memcpy(insertion, *inputp, chunkLen);
         insertion += chunkLen;
         *inputp += chunkLen; 
@@ -197,12 +192,6 @@ static void finalizeChunkedResponse(Response rsp){
     if(!rsp->complete || rsp->expLen != -1){
         return;
     }
-
-    // char *str;
-    // responseToString(rsp, &str);
-    // fprintf(stderr, "FINALIZING\n%s\n", str);
-
-    //dechunk(&(rsp->body), &(rsp->bodyLen));
     struct phr_chunked_decoder decoder = {};
     size_t tmpLen = rsp->bodyLen;
     int err =  phr_decode_chunked(&decoder, rsp->body, &tmpLen);
@@ -211,17 +200,11 @@ static void finalizeChunkedResponse(Response rsp){
         fprintf(stderr, "Error at dechunking\n");
         return;
     }
-
-    fprintf(stderr, "dechunking done, final length %d\n", rsp->bodyLen);
-    // responseToString(rsp, &str);
-    // fprintf(stderr, "RESULT\n%s\n", str);
     rsp->expLen = rsp->bodyLen;
     char lenStr[10];
     sprintf(lenStr, "%d", rsp->bodyLen);
     addHeader(&(rsp->headers), "Content-Length", lenStr);
     removeHeader(&(rsp->headers), "Transfer-Encoding");
-    // responseToString(rsp, &str);
-    // fprintf(stderr, "RESULT2\n%s\n", str);
 }
 
 /* Finalizes (replace transfer encoding if originally chunking) responses when complete is called */
@@ -241,7 +224,6 @@ bool responseComplete(Response rsp, int *remaining){
     }else{
         /* Chunked case */
         if(rsp->bodyLen >= 5 && strncmp(rsp->body + rsp->bodyLen - 5, "0\r\n\r\n", 5) == 0){
-            fprintf(stderr, "ITS A MIRACLE SEEING THE END OF A CHUNK\n");
             finalizeChunkedResponse(rsp);
             if(remaining != NULL){
                 *remaining = 0;
@@ -257,14 +239,10 @@ bool responseComplete(Response rsp, int *remaining){
 
 /* Responses with partial header cannot be determined, so store unconditionally */
 bool responseStoreForward(Response rsp){
-    fprintf(stderr, "Store Forward check\n");
     if(rsp->partialHead){
-        fprintf(stderr, "returned true\n");
         return true;
     }
-    fprintf(stderr, "returned %d\n", rsp->storeForward);
     return rsp->storeForward;
-    // return false;
 }
 
 /* Returns true if header component complete */

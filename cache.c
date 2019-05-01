@@ -49,12 +49,11 @@ Response cache_get(Cache csh, Request req, int *agep)
     }else{
         entry = Table_get(csh, uri);
     }
-    fprintf(stderr, "Cache query for %s\n", uri);
+    fprintf(stderr, "[CACHE] Cache query for %s\n", uri);
 
     if (entry == NULL){
         return NULL;
     }else if(entry->expireTime != 0 && entry->expireTime < time(NULL)){
-        fprintf(stderr, "FOUND BUT EXPIRED\n");
         free(entry->response);
         free(entry);
         return NULL;
@@ -75,9 +74,8 @@ Response cache_get(Cache csh, Request req, int *agep)
         ageHeader->value = calloc(1, BUF_SIZE);
         sprintf(ageHeader->value, "%d", age);
     }
-    fprintf(stderr, "Cache hit for %s\n", uri);
+    fprintf(stderr, "[CACHE] Cache hit for %s\n", uri);
     return responseDuplicate(entry->response);
-    // return entry->response;
 }
 
 /* return value as an indicator if its freeable */

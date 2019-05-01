@@ -33,7 +33,6 @@ static void stripRearSpace(char *str, int len){
 }
 
 Request requestNew(char * message, size_t length){
-    // fprintf(stderr, "MESSAGE:\n%s\n", message);
     if(length <= 0){
         return NULL;
     }
@@ -76,7 +75,6 @@ Request requestNew(char * message, size_t length){
     token = strsep(&rest, "\n");
 
     while(token != NULL){
-        // fprintf(stderr, "TOKEN (%d): %d\n",strlen(token), *token);
         if(strlen(token) == 0 || *token == '\r'){
             break;
         }
@@ -109,7 +107,6 @@ Request requestNew(char * message, size_t length){
 }
 
 void requestFree(Request req){
-    // fprintf(stderr, "FREEING\n");
     if(req == NULL){
         return;
     }
