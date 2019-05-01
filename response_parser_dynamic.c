@@ -90,11 +90,10 @@ Response responseNew(char * message, size_t length){
 
     token = strsep(&rest, "\n");
     char version[FIELD_BUFFER_SIZE];
-    char reason[FIELD_BUFFER_SIZE];
-    if(sscanf(token, "%s %d %s", version, &(rsp->status), reason) == 3){
-        int len = strlen(reason) + 1;
-        rsp->reason = malloc(len);
-        memcpy(rsp->reason, reason, len);
+    int reasonStart;
+    if(sscanf(token, "%s %d %n", version, &(rsp->status), &reasonStart) == 2){
+        rsp->reason = strdup(token + reasonStart);
+        stripRearSpace(rsp->reason, -1);
     }
     if(strncmp(version, "HTTP/1.1", 8) != 0){
         fprintf(stderr, "Warn: using unvalidated HTTP version %s\n", token);
@@ -186,6 +185,7 @@ Response responseNew(char * message, size_t length){
         free(msg);
     }else{
         /* responses with no body */
+        fprintf(stderr, "NO BODY CASE\n");
         rsp->bodyLen = 0;
         rsp->chunkRemain = -1;
         rsp->body = strdup("");
@@ -380,18 +380,16 @@ int responseToString(Response rsp, char **strp){
         headLen = toStringHeader(rsp->headers, &headStr);
     }
 
-    int bodyLen = 0;
-    if(rsp->body != NULL){
-        bodyLen = strlen(rsp->body);
-    }
-
-    *strp = malloc(headLen + bodyLen + FIELD_BUFFER_SIZE); /* rough size, over allocating */
+    *strp = malloc(headLen + rsp->bodyLen + FIELD_BUFFER_SIZE); /* rough size, over allocating */
 
     int len;
     if(rsp->body == NULL){
         sprintf(*strp, "%s %d %s\r\n%s%n", "HTTP/1.1", rsp->status, rsp->reason, headStr, &len);
     }else{
-        sprintf(*strp, "%s %d %s\r\n%s\r\n%s%n", "HTTP/1.1", rsp->status, rsp->reason, headStr, rsp->body, &len);
+        int startBody;
+        sprintf(*strp, "%s %d %s\r\n%s\r\n%n", "HTTP/1.1", rsp->status, rsp->reason, headStr, &startBody);
+        memcpy((*strp) + startBody, rsp->body, rsp->bodyLen);
+        len = startBody + rsp->bodyLen;
     }
     free(headStr);
     return len;
