@@ -30,8 +30,12 @@ Response responseDuplicate(Response source){
     rsp->chunkRemain = source->chunkRemain;
     rsp->complete = source->complete;
     rsp->status = source->status;
-    rsp->body = malloc(rsp->bodyLen + 1);
-    memcpy(rsp->body, source->body, rsp->bodyLen + 1);
+    if(source->body == NULL){
+        rsp->body = NULL;    
+    }else{
+        rsp->body = malloc(rsp->bodyLen + 1);
+        memcpy(rsp->body, source->body, rsp->bodyLen + 1);
+    }
     return rsp;
 }
 
@@ -233,14 +237,21 @@ bool responseComplete(Response rsp, int *remaining){
     if((h = getHeader(rsp->headers, "Content-Length")) != NULL){
         int clen = atoi(h->value);
         int rem = clen - rsp->bodyLen;
+        fprintf(stderr, "SANTIY CHECK\n");
         if(remaining != NULL){
             *remaining = rem;
         }
         return (rem == 0);
     }else if(rsp->chunkRemain == 0){
+        fprintf(stderr, "CHUNK\n");
+
         finalizeResponse(rsp);
         return true;
     }
+    if(remaining != NULL){
+        *remaining = -1;
+    }
+    fprintf(stderr, "chunk has %d remaining\n", rsp->chunkRemain);
     return (rsp->chunkRemain == -1); /* returns true if not chunked */
 }
 
@@ -280,10 +291,6 @@ bool responseAppendBody(Response *rspp, char *msg, int len){
         return (*rspp)->complete;
     }
 
-    if(msg == NULL || len == 0){
-        assert(false);      /* debug use, remove when deploying*/
-        return (*rspp)->complete;
-    }
     if((*rspp)->chunkRemain >= 0){
         if((*rspp)->chunkRemain == 0){
             int chunkLen = 0;
@@ -325,8 +332,27 @@ bool responseAppendBody(Response *rspp, char *msg, int len){
                 }
             }
             return (*rspp)->complete;
+        }else{
+            /* +2 for the /r/n at the end of each chunk */
+            (*rspp)->body = realloc((*rspp)->body, len + (*rspp)->bodyLen);
+            if((*rspp)->chunkRemain + 2 < len){
+                /* Msg contains more than one chunk */
+                memcpy((*rspp)->body + (*rspp)->bodyLen, msg, (*rspp)->chunkRemain);
+                (*rspp)->bodyLen += (*rspp)->chunkRemain;
+                int rem = (*rspp)->chunkRemain + 2;
+                (*rspp)->chunkRemain = 0;
+                return responseAppendBody(rspp, msg + rem, len - rem);
+            }else{
+                /* Msg contains less than one chunk */
+                /* boundary happens at /r/n case; low probability to handle? */
+                memcpy((*rspp)->body + (*rspp)->bodyLen, msg, len);
+                (*rspp)->bodyLen += (*rspp)->chunkRemain;
+                (*rspp)->chunkRemain -= len;
+                return false;
+            }
         }
     }else{
+        /* Non-chunking mode */
         int rem;
         char *rspStr;
         responseToString(*rspp, &rspStr);
@@ -373,6 +399,7 @@ void responseUpdateBody(Response rsp, char *newBody, int newLen){
     rsp->bodyLen = newLen;
     rsp->body = malloc(newLen + 1);
     memcpy(rsp->body, newBody, newLen);
+    rsp->body[newLen] = '\0';
 
     char lenStr[10];
     sprintf(lenStr, "%d", newLen);

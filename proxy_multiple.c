@@ -606,8 +606,9 @@ int handleRead(int sourceSock, GenericState *statep, WriteBuffer wb, DTable dt, 
             /* check here if response is complete; if so, check store forward, and add to write buffer it true */
             
             holdResponse = responseStoreForward(state->response);
-            if(responseComplete(state->response, NULL)){
-
+            int remLen;
+            if(responseComplete(state->response, &remLen)){
+                fprintf(stderr, "RESPONSE COMPLETED\n");
 
 
                 cache_add(csh, state->request, state->response);
@@ -624,6 +625,7 @@ int handleRead(int sourceSock, GenericState *statep, WriteBuffer wb, DTable dt, 
                 responseFree(state->response);
                 state->response = NULL;
             }
+            fprintf(stderr, "RESPONSE NOT COMPLETE, %d left\n", remLen);
             ps->state = SERVER_READ;
             destSock = ps->clientSock;
         }

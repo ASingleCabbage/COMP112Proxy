@@ -180,12 +180,9 @@ bool headerHasValue(Header h, char *target, char *delim){
         return false;
     }
     char *vals = strdup(h->value);
-
-    
-    
     char *token = strsep(&vals, delim); /*whitespace may need stripping, not sure*/
     
-    while(vals != NULL){
+    do{
         if(strlen(token) < 1){
             break;
         }
@@ -194,6 +191,6 @@ bool headerHasValue(Header h, char *target, char *delim){
             return true;
         }
         token = strsep(&vals, ",");
-    }
+    }while(vals != NULL);
     return false;
 }
