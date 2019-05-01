@@ -224,12 +224,10 @@ int main(int argc, char **argv){
                                     responseFree(ss->response);
                                 }
                             }
-                            fprintf(stderr, "FREE3\n");
                             requestFree(ss->request);
                             free(ss);
                         }
                     }else{
-                        fprintf(stderr, "GENERIC CASE\n");
                         GenericState state;
                         int destSock;
                         if((destSock = handleRead(i, &state, wb, dt, &active_write_set, csh)) < 0){
@@ -375,11 +373,18 @@ int handleWrite(int destSock, WriteEntry we, DTable dt){
 }
 
 int handleStdin(){
-    char buffer[11];
-    int len = read(STDIN_FILENO, buffer, 10);
+    char buffer[BUF_SIZE];
+    int len = read(STDIN_FILENO, buffer, BUF_SIZE);
     buffer[len] = '\0';
-    if(buffer[0] == 'q'){
+    
+    if(strncmp(buffer, "--owo", 5) == 0){
+        inspectToggleOptions(OWO, NULL);
+    }else if(strncmp(buffer, "--blacklist", 11) == 0){
+        inspectToggleOptions(BLACKLIST, buffer + 12);
+    }else if(buffer[0] == 'q'){
         /* graceful termination option */
+    }else{
+        fprintf(stderr, "[PROXY] ERROR: %s is not a recognized input\n", buffer);
     }
     return 0;
 }

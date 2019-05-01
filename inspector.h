@@ -5,8 +5,9 @@
 
 void initInspector();
 
-// void censorRegion(char *start, char *end);
-// void censorHtml(char *html, int len);
+typedef enum { BLACKLIST, OWO } inspectorOptions;
+
+void inspectToggleOptions(inspectorOptions options, char *value);
 
 void inspectResponse(Response rsp);
 

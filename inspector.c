@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <zlib.h>
+#include <ctype.h>
 #include "libdeflate.h"
 
 #define ASCII_BLOCK_CHAR 219
@@ -13,19 +13,39 @@
 #define COMPRESS_LEVEL 4 /* 1-12, higher slower */
 #define INITIAL_DECOMPRESS_FACTOR 4
 
-static char **inspector_wordlist;
-static int inspector_wordlist_len;
+char *inspector_blacklist_word;
 static struct libdeflate_compressor *Compressor;
 static struct libdeflate_decompressor *Decompressor;
+
+static bool inspector_option_owo;
+static bool inspector_option_blacklist;
 
 void initInspector(){
     Compressor = libdeflate_alloc_compressor(COMPRESS_LEVEL);
     Decompressor = libdeflate_alloc_decompressor();
 
-    inspector_wordlist = malloc(WORDLIST_LEN_HINT);
-    inspector_wordlist_len = 1;
-    inspector_wordlist[0] = strdup("network");
+    inspector_option_owo = false;
+    inspector_option_blacklist = true;
+
+    inspector_blacklist_word = strdup("network");
     fprintf(stderr, "[INSPECTOR] Initialized\n");
+}
+
+static void stripRearSpace(char *str, int len){
+    int index;
+    if(len < 0){
+        index = strlen(str) - 1;
+    }else{
+        index = len - 1;
+    }
+    while(index >= 0){
+        if(isspace(str[index])){
+            str[index] = '\0';
+        }else{
+            return;
+        }
+        index--;
+    }
 }
 
 /* Retries by doubling initial buffer size if insufficient buffer size */
@@ -71,8 +91,37 @@ static int gzipCompress(char *data, int len, char **compressp){
     return result;
 }
 
+void inspectToggleOptions(inspectorOptions options, char *value){
+    switch (options)
+    {
+        case OWO:
+            inspector_option_owo = !inspector_option_owo;
+            fprintf(stderr, "[INSPECTOR] Set option OwO to %d\n", inspector_option_owo);
+             fprintf(stderr,"                 *Notices Proxy*\n"
+                   " __        ___           _    _        _   _     _      \n"
+                    "\\ \\      / / |__   __ _| |_ ( ) ___  | |_| |__ (_) ___ \n"
+                   " \\ \\ /\\ / /| '_ \\ / _\\`| __|// / __| | __| '_ \\| |/ __|\n"
+                   "  \\ V  V / | | | | (_| | |_    \\__ \\ | |_| | | | |\\__ \\\n"
+                   "   \\_/\\_/  |_| |_|\\__,_|\\__|   |___/ \\___|_| |_|_|/___/\n");
+            break;
+        case BLACKLIST:
+            if(value == NULL){
+                inspector_option_blacklist = !inspector_option_blacklist;
+                fprintf(stderr, "[INSPECTOR] Set option blacklist to %d\n", inspector_option_blacklist);
+            }else{
+                free(inspector_blacklist_word);
+                stripRearSpace(value, -1);
+                inspector_blacklist_word = strdup(value);
+                fprintf(stderr, "[INSPECTOR] Updated blacklist phrase to [%s]\n", inspector_blacklist_word);
+            }
+            break;
+    }
+
+
+}
+
 static void censorRegion(char *start, char *end){
-    char *target = inspector_wordlist[0];
+    char *target = inspector_blacklist_word;
     int targetLen = strlen(target);
     *end = '\0';
 
@@ -128,8 +177,12 @@ static void censorHtml(char *html, int len){
                 i += 5;
                 styleZone = true;
             }else if(start != NULL){
-                censorRegion(start, html + i);
-                OwO(start, html + i);
+                if(inspector_option_blacklist){
+                    censorRegion(start, html + i);
+                }
+                if(inspector_option_owo){
+                    OwO(start, html + i);
+                }
             }
         }else if(html[i] == '>'){
             if(!styleZone && !scriptZone){
