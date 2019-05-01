@@ -1,4 +1,5 @@
 #include "response_parser_dynamic.h"
+#include "picohttpparser.h"
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -15,7 +16,7 @@ struct response{
     bool storeForward;
     bool partialHead;
     int bodyLen;
-    int chunkRemain;
+    int expLen;  /* -1 for chunked encoding */
     bool complete;
     int status;
 };
@@ -27,7 +28,7 @@ Response responseDuplicate(Response source){
     rsp->storeForward = source->storeForward;
     rsp->partialHead = source->partialHead;
     rsp->bodyLen = source->bodyLen;
-    rsp->chunkRemain = source->chunkRemain;
+    rsp->expLen = source->expLen;
     rsp->complete = source->complete;
     rsp->status = source->status;
     if(source->body == NULL){
@@ -78,6 +79,7 @@ Response responseNew(char * message, size_t length){
     if(length <= 0){
         return NULL;
     }
+    fprintf(stderr, "New response from\n%s\n", message);
 
     char *msg = malloc(length + 1);
     memcpy(msg, message, length);
@@ -123,78 +125,38 @@ Response responseNew(char * message, size_t length){
     }
 
     if(rest == NULL){
-        rsp->chunkRemain = -1;
         free(msg);
         return rsp;
     }
 
     Header h;
+    int restLen = length - (rest - msg);
     if((h = getHeader(rsp->headers, "Content-Type")) != NULL && headerHasValue(h, "text/html", ";")){
         rsp->storeForward = true;
     }
 
     if((h = getHeader(rsp->headers, "Content-Length")) != NULL){
-        rsp->chunkRemain = -1;
-        rsp->body = calloc(1, atoi(h->value) + 1);
-
-        int restLen = length - (rest - msg);
-        if(rest != NULL){
-            memcpy(rsp->body, rest, restLen + 1);
-            rsp->bodyLen += restLen;
-        }
-        free(msg);
-    }else if((h = getHeader(rsp->headers, "Transfer-Encoding")) != NULL){
-        /* May or may not have to check for chunked mode */
-        token = strsep(&rest, "\n");
-        int chunkLen = strtol(token, NULL, 16);
-        int restLen = 0;
-        if(rest != NULL){
-            restLen = strlen(rest);
-        }
-
-        if(chunkLen == 0){
-            rsp->complete = true;
-            free(msg);
-            return rsp;
-        }else if(chunkLen >= restLen){
-            /* Contains one partial chunk */
-            rsp->body = malloc(chunkLen + 1);
-            rsp->bodyLen = restLen;
-            memcpy(rsp->body, rest, restLen + 1);
-            rsp->chunkRemain = chunkLen - restLen;
-        }else{
-            rsp->body = malloc(restLen + 1);
-            char *pos = rsp->body;
-            do {
-                memcpy(pos, rest, chunkLen);
-                rest += chunkLen;
-                restLen -= chunkLen;
-                rsp->bodyLen += chunkLen;
-                pos += chunkLen;
-                token = strsep(&rest, "\n");
-                if(token == NULL){
-                    assert(false);
-                    chunkLen = 0;
-                    restLen = 0;
-                }else{
-                    chunkLen = strtol(token, NULL, 16);
-                }
-            } while(chunkLen < restLen && chunkLen != 0);
-
-            // strncpy(pos, rest, restLen + 1); //todo this overflows on some links on wikipedia
-            memcpy(pos, rest, restLen + 1); //todo this overflows on some links on wikipedia (links ending with ':'?)
-            rsp->bodyLen += restLen;
-            rsp->chunkRemain = chunkLen - restLen;
-        }
-        free(msg);
+        rsp->expLen = atoi(h->value);
+        rsp->body = calloc(1, rsp->expLen + 1);
+    }else if(headerHasValue(getHeader(rsp->headers, "Transfer-Encoding"), "chunked" , ",")){
+        rsp->expLen = -1;
+        rsp->body = malloc(restLen + 1);
     }else{
         /* responses with no body */
+        /* not sure if this needs to be a special case */
         fprintf(stderr, "NO BODY CASE\n");
-        rsp->bodyLen = 0;
-        rsp->chunkRemain = -1;
-        rsp->body = strdup("");
-
+        // rsp->body = strdup("");
+        rsp->complete = true;
+        free(msg);
+        return rsp; 
     }
+
+    if(rest != NULL){
+        memcpy(rsp->body, rest, restLen + 1);
+        rsp->bodyLen += restLen;
+    }
+    free(msg);
+
     return rsp;
 }
 
@@ -208,19 +170,58 @@ void responseFree(Response rsp){
     free(rsp);
 }
 
-/* change transfer encoding to non-chunked */
-static void finalizeResponse(Response rsp){
-    char *msgStr;
-    responseToString(rsp, &msgStr);
+static void dechunk(char **inputp, int *lenp){
+    char *original = *inputp; 
+    char *tmp = malloc(*lenp);
+    int chunkLen, offset;
+    char *insertion = tmp;
 
-    if(rsp->chunkRemain != -1){
-        // fprintf(stderr, "CHUNK %d, body len %d\n", rsp->chunkRemain, rsp->bodyLen);
-
-        char lenStr[10];
-        sprintf(lenStr, "%d", rsp->bodyLen);
-        addHeader(&(rsp->headers), "Content-Length", lenStr);
+    int n = sscanf(*inputp, "%x\r\n%n", &chunkLen, &offset);
+    while(chunkLen != 0 || n != 1){
+        *inputp += offset;
+        fprintf(stderr, "Insertion position %p <-- %p, %d\n", insertion, *inputp, chunkLen);
+        memcpy(insertion, *inputp, chunkLen);
+        insertion += chunkLen;
+        *inputp += chunkLen; 
+        n = sscanf(*inputp, "%x\r\n%n", &chunkLen, &offset);
     }
-    rsp->chunkRemain = -1;
+
+    *lenp = insertion - tmp;
+    free(original);
+    *inputp = tmp;
+}
+
+
+/* change transfer encoding to non-chunked */
+static void finalizeChunkedResponse(Response rsp){
+    if(!rsp->complete || rsp->expLen != -1){
+        return;
+    }
+
+    // char *str;
+    // responseToString(rsp, &str);
+    // fprintf(stderr, "FINALIZING\n%s\n", str);
+
+    //dechunk(&(rsp->body), &(rsp->bodyLen));
+    struct phr_chunked_decoder decoder = {};
+    size_t tmpLen = rsp->bodyLen;
+    int err =  phr_decode_chunked(&decoder, rsp->body, &tmpLen);
+    rsp->bodyLen = tmpLen;
+    if(err < 0){
+        fprintf(stderr, "Error at dechunking\n");
+        return;
+    }
+
+    fprintf(stderr, "dechunking done, final length %d\n", rsp->bodyLen);
+    // responseToString(rsp, &str);
+    // fprintf(stderr, "RESULT\n%s\n", str);
+    rsp->expLen = rsp->bodyLen;
+    char lenStr[10];
+    sprintf(lenStr, "%d", rsp->bodyLen);
+    addHeader(&(rsp->headers), "Content-Length", lenStr);
+    removeHeader(&(rsp->headers), "Transfer-Encoding");
+    // responseToString(rsp, &str);
+    // fprintf(stderr, "RESULT2\n%s\n", str);
 }
 
 /* Finalizes (replace transfer encoding if originally chunking) responses when complete is called */
@@ -231,28 +232,27 @@ bool responseComplete(Response rsp, int *remaining){
     if(rsp->partialHead){
         return false;
     }
-    Header h;
-    char *headers;
-    toStringHeader(rsp->headers, &headers);
-    if((h = getHeader(rsp->headers, "Content-Length")) != NULL){
-        int clen = atoi(h->value);
-        int rem = clen - rsp->bodyLen;
-        fprintf(stderr, "SANTIY CHECK\n");
+    if(rsp->expLen != -1){
+        int rem = rsp->expLen - rsp->bodyLen;
         if(remaining != NULL){
             *remaining = rem;
         }
         return (rem == 0);
-    }else if(rsp->chunkRemain == 0){
-        fprintf(stderr, "CHUNK\n");
-
-        finalizeResponse(rsp);
-        return true;
+    }else{
+        /* Chunked case */
+        if(rsp->bodyLen >= 5 && strncmp(rsp->body + rsp->bodyLen - 5, "0\r\n\r\n", 5) == 0){
+            fprintf(stderr, "ITS A MIRACLE SEEING THE END OF A CHUNK\n");
+            finalizeChunkedResponse(rsp);
+            if(remaining != NULL){
+                *remaining = 0;
+            }
+            return true;
+        }
+        if(remaining != NULL){
+            *remaining = -1;
+        }
+        return false;
     }
-    if(remaining != NULL){
-        *remaining = -1;
-    }
-    fprintf(stderr, "chunk has %d remaining\n", rsp->chunkRemain);
-    return (rsp->chunkRemain == -1); /* returns true if not chunked */
 }
 
 /* Responses with partial header cannot be determined, so store unconditionally */
@@ -291,86 +291,23 @@ bool responseAppendBody(Response *rspp, char *msg, int len){
         return (*rspp)->complete;
     }
 
-    if((*rspp)->chunkRemain >= 0){
-        if((*rspp)->chunkRemain == 0){
-            int chunkLen = 0;
-            (*rspp)->body = realloc((*rspp)->body, len + (*rspp)->bodyLen);
-
-            int hexLen;
-            sscanf(msg, "%x\r\n%n", &chunkLen, &hexLen);
-            if(chunkLen == 0){
-                (*rspp)->complete = true;
-                return (*rspp)->complete;
-            }
-
-            msg += hexLen;
-            len -= hexLen;
-
-            char *insertPos = (*rspp)->body + (*rspp)->bodyLen;
-            if(chunkLen > len){
-                /* partial chunk only */
-                memcpy(insertPos, msg, len + 1);
-                (*rspp)->bodyLen += len;
-                (*rspp)->chunkRemain = chunkLen - len;
-            }else{
-                /* full or more than one chunk */
-                do {
-                    memcpy(insertPos, msg, chunkLen);
-                    (*rspp)->bodyLen += chunkLen;
-                    insertPos = insertPos + chunkLen;
-                    sscanf(msg, "%x\r\n%n", &chunkLen, &hexLen);
-                    msg += hexLen;
-                    len -= hexLen;
-                }while(chunkLen < len);
-
-                if(chunkLen == 0){
-                    (*rspp)->complete = true;
-                }else{
-                    memcpy(insertPos, msg, len + 1);
-                    (*rspp)->bodyLen += len;
-                    (*rspp)->chunkRemain = chunkLen - len;
-                }
-            }
-            return (*rspp)->complete;
-        }else{
-            /* +2 for the /r/n at the end of each chunk */
-            (*rspp)->body = realloc((*rspp)->body, len + (*rspp)->bodyLen);
-            if((*rspp)->chunkRemain + 2 < len){
-                /* Msg contains more than one chunk */
-                memcpy((*rspp)->body + (*rspp)->bodyLen, msg, (*rspp)->chunkRemain);
-                (*rspp)->bodyLen += (*rspp)->chunkRemain;
-                int rem = (*rspp)->chunkRemain + 2;
-                (*rspp)->chunkRemain = 0;
-                return responseAppendBody(rspp, msg + rem, len - rem);
-            }else{
-                /* Msg contains less than one chunk */
-                /* boundary happens at /r/n case; low probability to handle? */
-                memcpy((*rspp)->body + (*rspp)->bodyLen, msg, len);
-                (*rspp)->bodyLen += (*rspp)->chunkRemain;
-                (*rspp)->chunkRemain -= len;
-                return false;
-            }
-        }
+    if((*rspp)->body == NULL){
+        (*rspp)->body = malloc(len);
     }else{
-        /* Non-chunking mode */
-        int rem;
-        char *rspStr;
-        responseToString(*rspp, &rspStr);
-
-        responseComplete((*rspp), &rem);
-        if(rem == len){
-            (*rspp)->complete = true;
-        }else if(rem < len){
-            fprintf(stderr, "Appending message %d larger than expected size... %d, yolo?\n", (len - rem), rem);
-            (*rspp)->complete = true;
-        }
-        if((*rspp)->bodyLen == 0){
-            (*rspp)->body = calloc(1, rem + 1);
+        int remainLen = 0;
+        if((*rspp)->expLen != -1){
+            remainLen = (*rspp)->expLen - (*rspp)->bodyLen;
         }
 
-        memcpy((*rspp)->body + (*rspp)->bodyLen, msg, len + 1);
-        (*rspp)->bodyLen += len;
+        if(remainLen < len){
+            (*rspp)->body = realloc((*rspp)->body, (*rspp)->bodyLen + len + 1);
+        }
     }
+
+    memcpy((*rspp)->body + (*rspp)->bodyLen, msg, len + 1);
+    (*rspp)->bodyLen += len;
+
+    (*rspp)->complete = responseComplete(*rspp, NULL);
     return (*rspp)->complete;
 }
 

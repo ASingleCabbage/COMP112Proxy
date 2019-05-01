@@ -18,7 +18,7 @@ all: $(EXECS)
 test: test.o inspector.o 
 	$(CC) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
-proxy_multiple: proxy_multiple.o http_header.o request_parser_dynamic.o response_parser_dynamic.o double_table.o ssl_utils.o write_buffer.o cache.o pcg_basic.o hash-string.o inspector.o libdeflate.a
+proxy_multiple: proxy_multiple.o http_header.o request_parser_dynamic.o response_parser_dynamic.o double_table.o ssl_utils.o write_buffer.o cache.o pcg_basic.o hash-string.o inspector.o picohttpparser.o libdeflate.a
 	$(CC) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
 # To get *any* .o file, compile its .c file with the following rule.

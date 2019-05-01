@@ -112,6 +112,8 @@ void removeHeader(Header *headp, char *name){
             free(curr);
             return;
         }
+        prev = curr;
+        curr = curr->next;
     }
     return;
 }

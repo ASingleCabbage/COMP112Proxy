@@ -381,10 +381,10 @@ int handleWrite(int destSock, WriteEntry we, DTable dt){
         }else{
             destSSL = state->clientSSL;
         }
-        fprintf(stderr, "Writing to socket %d (ssl), %d bytes\n", destSock, we->msgLen);
+        fprintf(stderr, "Writing to socket %d (ssl), %d bytes\n%s\n", destSock, we->msgLen, we->message);
         stat = SSL_write(destSSL, we->message, we->msgLen);
     }else{
-        fprintf(stderr, "Writing to socket %d (plain) %d bytes\n", destSock, we->msgLen);
+        fprintf(stderr, "Writing to socket %d (plain) %d bytes\n%s\n", destSock, we->msgLen, we->message);
         stat = write(destSock, we->message, we->msgLen);
     }
     free(we->message); /* This may cause issues (?) */
@@ -607,6 +607,7 @@ int handleRead(int sourceSock, GenericState *statep, WriteBuffer wb, DTable dt, 
             
             holdResponse = responseStoreForward(state->response);
             int remLen;
+            fprintf(stderr, "ping 1\n");
             if(responseComplete(state->response, &remLen)){
                 fprintf(stderr, "RESPONSE COMPLETED\n");
 
