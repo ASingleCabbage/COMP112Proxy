@@ -24,7 +24,7 @@ void initInspector(){
     Compressor = libdeflate_alloc_compressor(COMPRESS_LEVEL);
     Decompressor = libdeflate_alloc_decompressor();
 
-    inspector_option_owo = false;
+    inspector_option_owo = true;
     inspector_option_blacklist = true;
 
     inspector_blacklist_word = strdup("network");

@@ -1,37 +1,6 @@
 /*
-    Multiple client proxy
-    Sequential benchmark: 9064ms
-    Current focus:
-        Integrating caching functions, mostly done but bugs
-        Store and forward mode and determining which response types to use that
-        New module focusing on Content Inspection functions
-
-    Problems:
-        HTTP requests transmitted are always not understood by the server???
-        Do more response frees; cache copy by value
-        Inspector needs a way to close the connection
-
-    Pending features:
-        Partial handling
-            request is assumed to be readable all at once -> no exceptions yet
-            Partial is catched through the Response object
-            Partial catching is done for all --> enable based on resource type?
-        Text replacement
-        Cacheing
-        Domain blacklisting
-        Content decoding
-        Debugging mode
-
-    General improvements
-        [COMPLETED] request and response parser overhaul for flexibility
-                        --> parsing all fields instead of
-                            cache control related only
-        [COMPLETED BUT BUGS] partial handling implementation complete
-        [COMPLETED] sockets are set to non-blocking during connect, hopefully preventing
-                    large amount of connect slowing down the proxy
-
-    Notes:
-        Memory allocations and frees are all over the freakin place
+    Multiple client proxy, SSL Inspection and Cache
+    COMP 112 Final Project - Hao-Wei (Daniel) Lan
 */
 
 #include <stdlib.h>
