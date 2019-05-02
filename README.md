@@ -1,7 +1,7 @@
 # COMP112 Project by Daniel ~~and Matt~~ #
  
  Compile with make, and run with ./proxy_multiple [port num]. Alternatively, run ./run.sh so that the proxy restarts after unexpected crashes (which hopefully should be almost nonexistent).
- Due to the -march=native optimization flag, the executable has to be made on the target machine.
+ Due to the -march=native optimization flag, the executable has to be made on the target machine. The proxy links to some COMP 40 libraries (mainly Seq.h and Table.h), so it's only compilable on one of the Tufts CS servers. (comp112-01 was giving me issues, but comp112-02 works just fine).
  
  
  Proxy supports multiple connections, along with SSL inspection. TLS traffic are decrypted at the proxy, and all incoming (to client) responses are re-encrypted and signed with the proxy's key.
